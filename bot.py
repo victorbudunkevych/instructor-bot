@@ -1928,14 +1928,6 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
 # ======================= MAIN =======================
 def main():
     try:
-        # Запускаємо keep-alive для Render
-        try:
-            from keep_alive import keep_alive
-            keep_alive()
-            logger.info("✅ Keep-alive сервер запущено")
-        except ImportError:
-            logger.info("ℹ️ Keep-alive не знайдено (нормально для локального запуску)")
-        
         init_db()
         init_lessons_table()
         init_students_table()
