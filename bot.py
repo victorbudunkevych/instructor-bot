@@ -1934,7 +1934,13 @@ def main():
         migrate_database()
         init_schedule_blocks_table()
 
-        app = ApplicationBuilder().token(TOKEN).build()
+        # Створюємо application з job_queue
+        from telegram.ext import JobQueue
+        app = (
+            ApplicationBuilder()
+            .token(TOKEN)
+            .build()
+        )
 
         # Команди
         app.add_handler(CommandHandler("start", start))
@@ -1946,11 +1952,13 @@ def main():
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
         app.add_handler(MessageHandler(filters.CONTACT, handle_message))
 
-        # Нагадування кожні 30 хв
-        app.job_queue.run_repeating(send_reminders, interval=1800, first=10)
-        
-        # Перевірка завершених кожні 15 хв
-        app.job_queue.run_repeating(check_completed_lessons, interval=900, first=60)
+        # Нагадування кожні 30 хв (тільки якщо job_queue існує)
+        if app.job_queue:
+            app.job_queue.run_repeating(send_reminders, interval=1800, first=10)
+            app.job_queue.run_repeating(check_completed_lessons, interval=900, first=60)
+            logger.info("✅ Job queue налаштовано")
+        else:
+            logger.warning("⚠️ Job queue недоступна - нагадування вимкнено")
 
         logger.info("🚀 Бот запущено!")
         print("🚀 Бот запущено і слухає...")
