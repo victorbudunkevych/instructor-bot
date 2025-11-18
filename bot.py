@@ -1936,7 +1936,7 @@ def main():
 
         app = ApplicationBuilder().token(TOKEN).build()
         if app.job_queue:
-        app.job_queue.scheduler.configure(timezone=TZ)
+            app.job_queue.scheduler.configure(timezone=TZ)
 
         # Команди
         app.add_handler(CommandHandler("start", start))
