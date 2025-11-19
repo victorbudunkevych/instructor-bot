@@ -1966,7 +1966,36 @@ def main():
         print(f"   490 грн: https://t.me/YOUR_BOT_USERNAME?start=register490")
         print(f"   550 грн: https://t.me/YOUR_BOT_USERNAME?start=register550")
         
-        app.run_polling()
+        # Запускаємо polling в окремому потоці
+        import threading
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        
+        # Простий HTTP сервер для Render
+        class HealthCheckHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'Bot is running!')
+            
+            def log_message(self, format, *args):
+                pass  # Вимикаємо логи HTTP сервера
+        
+        # Запускаємо бота в окремому потоці
+        def run_bot():
+            app.run_polling()
+        
+        bot_thread = threading.Thread(target=run_bot, daemon=True)
+        bot_thread.start()
+        
+        # Запускаємо HTTP сервер на порту 8080 (для Render)
+        port = int(os.environ.get('PORT', 8080))
+        server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+        logger.info(f"🌐 HTTP сервер запущено на порту {port}")
+        print(f"🌐 HTTP сервер запущено на порту {port}")
+        
+        # Блокуємо головний потік HTTP сервером
+        server.serve_forever()
     
     except Exception as e:
         logger.error(f"Critical error: {e}", exc_info=True)
