@@ -1963,8 +1963,8 @@ def main():
         logger.info("🚀 Бот запущено!")
         print("🚀 Бот запущено і слухає...")
         print("\n📝 Посилання для реєстрації учнів:")
-        print(f"   490 грн: https://t.me/YOUR_BOT_USERNAME?start=register490")
-        print(f"   550 грн: https://t.me/YOUR_BOT_USERNAME?start=register550")
+        print(f"   490 грн: https://t.me/InstructorIFBot?start=register490")
+        print(f"   550 грн: https://t.me/InstructorIFBot?start=register550")
         
         # Запускаємо polling в окремому потоці
         import threading
