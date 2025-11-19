@@ -74,6 +74,44 @@ logger = logging.getLogger(__name__)
 
 TZ = pytz.timezone(TIMEZONE)
 
+# ======================= AUTO-ADD INSTRUCTORS =======================
+def ensure_instructors_exist():
+    """Автоматично додає інструкторів якщо їх немає в базі"""
+    instructors = [
+        (662748304, 'Гошовська Інна', '+380000000000', 'Автомат', 490),
+        (666619757, 'Фірсов Артур', '+380000000000', 'Механіка', 550),
+        (982534001, 'Будункевич Мирослав', '+380000000000', 'Механіка', 550),
+        (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 490),
+        (6640009381, 'Блажевський Ігор', '+380000000000', 'Механіка', 550),
+        (501591448, 'Рекетчук Богдан', '+380000000000', 'Механіка', 550),
+        (960755539, 'Данилишин Святослав', '+380000000000', 'Механіка', 550)
+    ]
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        added = 0
+        
+        for telegram_id, name, phone, transmission, price in instructors:
+            cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (telegram_id,))
+            if not cursor.fetchone():
+                cursor.execute("""
+                    INSERT INTO instructors (telegram_id, name, phone, transmission, price_per_hour, is_active, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (telegram_id, name, phone, transmission, price, 1, datetime.now()))
+                logger.info(f"✅ Додано інструктора: {name} ({transmission})")
+                added += 1
+        
+        if added > 0:
+            conn.commit()
+            logger.info(f"🎉 Автоматично додано {added} інструкторів")
+        else:
+            logger.info("ℹ️ Всі інструктори вже є в базі")
+
+def is_instructor(telegram_id):
+    """Перевіряє чи є користувач інструктором"""
+    instructor = get_instructor_by_telegram_id(telegram_id)
+    return instructor is not None
+
 # ======================= HELPERS =======================
 def get_next_dates(days=14):
     """Генерує список дат на найближчі N днів"""
@@ -1933,6 +1971,9 @@ def main():
         init_students_table()
         migrate_database()
         init_schedule_blocks_table()
+        
+        # Автоматично додаємо інструкторів якщо їх немає
+        ensure_instructors_exist()
 
         # Створюємо application з job_queue
         from telegram.ext import JobQueue
