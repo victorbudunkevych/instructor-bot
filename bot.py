@@ -1988,7 +1988,8 @@ def main():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                app.run_polling()
+                # Запускаємо без signal handlers (вони не працюють в потоках)
+                app.run_polling(drop_pending_updates=True, stop_signals=None)
             finally:
                 loop.close()
         
