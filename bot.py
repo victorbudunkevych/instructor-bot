@@ -1981,9 +1981,16 @@ def main():
             def log_message(self, format, *args):
                 pass  # Вимикаємо логи HTTP сервера
         
-        # Запускаємо бота в окремому потоці
+        # Запускаємо бота в окремому потоці з новим event loop
         def run_bot():
-            app.run_polling()
+            import asyncio
+            # Створюємо новий event loop для цього потоку
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                app.run_polling()
+            finally:
+                loop.close()
         
         bot_thread = threading.Thread(target=run_bot, daemon=True)
         bot_thread.start()
