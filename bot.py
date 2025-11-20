@@ -58,7 +58,13 @@ from database import (
     register_student,
     get_student_by_telegram_id,
     update_lesson,
-    add_lesson_rating
+    add_lesson_rating,
+    init_reschedule_requests_table,
+    create_reschedule_request,
+    get_pending_reschedule_by_student,
+    accept_reschedule_request,
+    reject_reschedule_request,
+    get_lesson_by_instructor_datetime
 )
 
 # Налаштування логування
@@ -370,6 +376,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"📥 Message: '{text}' | State: '{state}'")
     
     try:
+        # === ПЕРЕВІРКА НА ЗАПИТ ПЕРЕНЕСЕННЯ (пріоритет!) ===
+        # Якщо учень натискає кнопки відповіді на перенесення БЕЗ стану
+        if text in ["✅ Так, обрати новий час", "❌ Ні, залишити як є"] and not state:
+            # Перевіряємо чи є активний запит для цього учня
+            request_data = get_pending_reschedule_by_student(user_id)
+            if request_data:
+                context.user_data["state"] = "reschedule_response"
+                await handle_reschedule_response(update, context)
+                return
+        
         # === РЕЄСТРАЦІЯ УЧНЯ ===
         if state == "registration_name":
             if text == "🔙 Скасувати":
@@ -497,6 +513,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state in ["schedule_menu", "block_choose_date", "block_choose_time_start", 
                      "block_choose_time_end", "block_choose_reason", "unblock_choose_date"]:
             await handle_schedule_management(update, context)
+            return
+
+        # === ПЕРЕНЕСЕННЯ ЗАНЯТЬ (УЧЕНЬ) ===
+        if state == "reschedule_response":
+            await handle_reschedule_response(update, context)
+            return
+        
+        if state == "reschedule_choose_date":
+            await handle_reschedule_date_selection(update, context)
+            return
+        
+        if state == "reschedule_choose_time":
+            await handle_reschedule_time_selection(update, context)
+            return
+        
+        if state == "reschedule_confirm":
+            await handle_reschedule_confirmation(update, context)
             return
 
         # === МЕНЮ СТУДЕНТА ===
@@ -1425,6 +1458,89 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         await show_all_blocks(update, context)
         return
     
+    # === ОБРОБКА КОНФЛІКТУ ПРИ БЛОКУВАННІ ===
+    if state == "block_with_conflict":
+        if text == "🔄 Запропонувати перенести":
+            user_id = update.message.from_user.id
+            instructor_data = get_instructor_by_telegram_id(user_id)
+            
+            if not instructor_data:
+                await update.message.reply_text("❌ Помилка.")
+                return
+            
+            instructor_id, instructor_name = instructor_data[0], instructor_data[1]
+            
+            lesson_id = context.user_data.get("temp_lesson_id")
+            student_name = context.user_data.get("temp_student_name")
+            student_telegram_id = context.user_data.get("temp_student_telegram_id")
+            date = context.user_data.get("temp_block_date")
+            time = context.user_data.get("temp_lesson_time")
+            duration = context.user_data.get("temp_duration")
+            
+            # Створюємо запит на перенесення
+            request_id = create_reschedule_request(
+                lesson_id, 
+                instructor_id, 
+                instructor_name,
+                student_telegram_id,
+                student_name,
+                date, 
+                time,
+                duration,
+                "Інструктор хоче заблокувати цей час"
+            )
+            
+            if request_id:
+                # Відправляємо учню
+                try:
+                    keyboard = [
+                        [KeyboardButton("✅ Так, обрати новий час")],
+                        [KeyboardButton("❌ Ні, залишити як є")]
+                    ]
+                    
+                    # Форматуємо дату для показу
+                    date_obj = datetime.strptime(date, "%Y-%m-%d")
+                    date_display = date_obj.strftime("%d.%m.%Y")
+                    
+                    await context.bot.send_message(
+                        chat_id=student_telegram_id,
+                        text=f"🔔 *Запит на перенесення*\n\n"
+                             f"👨‍🏫 Інструктор: {instructor_name}\n\n"
+                             f"Ваше заняття:\n"
+                             f"📅 {date_display} о {time}\n"
+                             f"⏱ Тривалість: {duration}\n\n"
+                             f"⚠️ Інструктор просить перенести це заняття на інший час.\n\n"
+                             f"Ви згодні перенести?",
+                        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True),
+                        parse_mode="Markdown"
+                    )
+                    
+                    # Встановлюємо стан для учня через context (буде працювати коли учень відповість)
+                    # Зберігаємо в БД що запит pending
+                    
+                    await update.message.reply_text(
+                        "✅ *Запит відправлено!*\n\n"
+                        "📨 Учень отримає повідомлення з проханням перенести заняття.\n\n"
+                        "⏳ Очікуємо підтвердження...\n\n"
+                        "Після підтвердження учня ви зможете заблокувати цей час.",
+                        parse_mode="Markdown"
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Failed to send reschedule request: {e}")
+                    await update.message.reply_text("❌ Помилка відправки запиту.")
+            else:
+                await update.message.reply_text("❌ Помилка створення запиту.")
+            
+            context.user_data.clear()
+            await manage_schedule(update, context)
+            return
+        
+        elif text == "🔙 Назад":
+            context.user_data.clear()
+            await manage_schedule(update, context)
+            return
+    
     # Тепер обробка станів
     logger.info(f"📍 Перевірка стану: {state}")
     if state == "block_choose_date":
@@ -1525,6 +1641,55 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         date_obj = datetime.strptime(block_date, "%d.%m.%Y")
         date_formatted = date_obj.strftime("%Y-%m-%d")
         
+        # ⚠️ ПЕРЕВІРЯЄМО ЧИ Є ЗАПИСИ НА ЦЕЙ ЧАС
+        start_hour = int(time_start.split(':')[0])
+        end_hour = int(time_end.split(':')[0])
+        
+        # Перевіряємо кожну годину в діапазоні
+        conflicting_lessons = []
+        for hour in range(start_hour, end_hour):
+            time_slot = f"{hour:02d}:00"
+            lesson = get_lesson_by_instructor_datetime(instructor_id, date_formatted, time_slot)
+            if lesson:
+                conflicting_lessons.append((time_slot, lesson))
+        
+        if conflicting_lessons:
+            # Є записи - пропонуємо перенести ПЕРШЕ заняття
+            time_slot, lesson_data = conflicting_lessons[0]
+            lesson_id, student_name, student_telegram_id, duration, student_tariff = lesson_data
+            
+            # Зберігаємо дані для можливості повторної спроби
+            context.user_data["temp_block_date"] = date_formatted
+            context.user_data["temp_block_date_display"] = block_date
+            context.user_data["temp_block_time_start"] = time_start
+            context.user_data["temp_block_time_end"] = time_end
+            context.user_data["temp_block_reason"] = reason
+            context.user_data["temp_lesson_id"] = lesson_id
+            context.user_data["temp_student_name"] = student_name
+            context.user_data["temp_student_telegram_id"] = student_telegram_id
+            context.user_data["temp_lesson_time"] = time_slot
+            context.user_data["temp_duration"] = duration
+            context.user_data["state"] = "block_with_conflict"
+            
+            keyboard = [
+                [KeyboardButton("🔄 Запропонувати перенести")],
+                [KeyboardButton("🔙 Назад")]
+            ]
+            
+            await update.message.reply_text(
+                f"⚠️ *На цей час є запис!*\n\n"
+                f"📋 Деталі:\n"
+                f"👤 Учень: {student_name}\n"
+                f"📅 Дата: {block_date}\n"
+                f"🕐 Час: {time_slot}\n"
+                f"⏱ Тривалість: {duration}\n\n"
+                f"Що бажаєте зробити?",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Немає конфліктів - блокуємо
         from database import add_schedule_block
         
         if add_schedule_block(instructor_id, date_formatted, time_start, time_end, "blocked", reason):
@@ -1986,6 +2151,251 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in check_completed_lessons: {e}", exc_info=True)
 
+# ======================= RESCHEDULE FUNCTIONS =======================
+async def handle_reschedule_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка відповіді учня на запит перенесення"""
+    text = update.message.text
+    user_id = update.message.from_user.id
+    
+    # Отримуємо активний запит для цього учня
+    request_data = get_pending_reschedule_by_student(user_id)
+    
+    if not request_data:
+        await update.message.reply_text("❌ Активних запитів на перенесення немає.")
+        return
+    
+    request_id, lesson_id, instructor_name, old_date, old_time, duration, created_at, instructor_id = request_data
+    
+    if text == "✅ Так, обрати новий час":
+        # Зберігаємо дані запиту
+        context.user_data["reschedule_request_id"] = request_id
+        context.user_data["reschedule_lesson_id"] = lesson_id
+        context.user_data["reschedule_instructor_name"] = instructor_name
+        context.user_data["reschedule_instructor_id"] = instructor_id
+        context.user_data["reschedule_old_date"] = old_date
+        context.user_data["reschedule_old_time"] = old_time
+        context.user_data["reschedule_duration"] = duration
+        context.user_data["state"] = "reschedule_choose_date"
+        
+        # Генеруємо дати
+        dates = get_next_dates(14)
+        keyboard = []
+        for i in range(0, len(dates), 2):
+            row = [KeyboardButton(dates[i])]
+            if i + 1 < len(dates):
+                row.append(KeyboardButton(dates[i + 1]))
+            keyboard.append(row)
+        
+        keyboard.append([KeyboardButton("🔙 Скасувати")])
+        
+        await update.message.reply_text(
+            "📅 Оберіть нову дату для заняття:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+        
+    elif text == "❌ Ні, залишити як є":
+        # Відхиляємо запит
+        if reject_reschedule_request(request_id):
+            # Повідомляємо інструктора
+            try:
+                await context.bot.send_message(
+                    chat_id=instructor_id,
+                    text=f"❌ *Учень відмовився від перенесення*\n\n"
+                         f"👤 Учень не хоче переносити заняття.\n\n"
+                         f"Запис залишається:\n"
+                         f"📅 {old_date} о {old_time}\n\n"
+                         f"Цей час заблокувати неможливо.",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify instructor: {e}")
+            
+            await update.message.reply_text(
+                "✅ Ваш вибір збережено.\n\n"
+                "Заняття залишається на початковому часі.",
+                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📋 Мої записи")]], resize_keyboard=True)
+            )
+        else:
+            await update.message.reply_text("❌ Помилка збереження відповіді.")
+        
+        context.user_data.clear()
+        return
+
+async def handle_reschedule_date_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору нової дати"""
+    text = update.message.text
+    
+    if text == "🔙 Скасувати":
+        await update.message.reply_text(
+            "❌ Перенесення скасовано.",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📋 Мої записи")]], resize_keyboard=True)
+        )
+        
+        # Відхиляємо запит
+        request_id = context.user_data.get("reschedule_request_id")
+        if request_id:
+            reject_reschedule_request(request_id)
+        
+        context.user_data.clear()
+        return
+    
+    # Парсимо дату
+    try:
+        parts = text.split()
+        date_part = parts[1]  # "20.11.2024"
+        date_obj = datetime.strptime(date_part, "%d.%m.%Y")
+        
+        context.user_data["reschedule_new_date"] = date_part
+        context.user_data["reschedule_new_date_obj"] = date_obj
+        context.user_data["state"] = "reschedule_choose_time"
+        
+        # Отримуємо вільні години
+        instructor_name = context.user_data.get("reschedule_instructor_name")
+        free_slots = get_available_time_slots(instructor_name, date_part)
+        
+        if not free_slots:
+            await update.message.reply_text(
+                "😔 На цю дату немає вільних місць.\n\nОберіть іншу дату:"
+            )
+            return
+        
+        # Формуємо клавіатуру
+        keyboard = []
+        for i in range(0, len(free_slots), 3):
+            row = [KeyboardButton(free_slots[j]) for j in range(i, min(i + 3, len(free_slots)))]
+            keyboard.append(row)
+        
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        await update.message.reply_text(
+            f"🕐 Оберіть новий час на {date_part}:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error parsing reschedule date: {e}")
+        await update.message.reply_text("❌ Невірний формат дати. Спробуйте ще раз.")
+
+async def handle_reschedule_time_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору нового часу"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "reschedule_choose_date"
+        dates = get_next_dates(14)
+        keyboard = []
+        for i in range(0, len(dates), 2):
+            row = [KeyboardButton(dates[i])]
+            if i + 1 < len(dates):
+                row.append(KeyboardButton(dates[i + 1]))
+            keyboard.append(row)
+        keyboard.append([KeyboardButton("🔙 Скасувати")])
+        
+        await update.message.reply_text(
+            "📅 Оберіть нову дату:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    # Підтвердження перенесення
+    new_time = text
+    new_date = context.user_data.get("reschedule_new_date")
+    old_date = context.user_data.get("reschedule_old_date")
+    old_time = context.user_data.get("reschedule_old_time")
+    duration = context.user_data.get("reschedule_duration")
+    instructor_name = context.user_data.get("reschedule_instructor_name")
+    
+    keyboard = [
+        [KeyboardButton("✅ Підтвердити перенесення")],
+        [KeyboardButton("🔙 Назад")]
+    ]
+    
+    await update.message.reply_text(
+        f"📋 *Підтвердження перенесення*\n\n"
+        f"🗓 *Старий час:*\n"
+        f"📅 {old_date} о {old_time}\n\n"
+        f"🆕 *Новий час:*\n"
+        f"📅 {new_date} о {new_time}\n\n"
+        f"👨‍🏫 Інструктор: {instructor_name}\n"
+        f"⏱ Тривалість: {duration}\n\n"
+        f"Підтверджуєте перенесення?",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    
+    context.user_data["reschedule_new_time"] = new_time
+    context.user_data["state"] = "reschedule_confirm"
+
+async def handle_reschedule_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка підтвердження перенесення"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "reschedule_choose_time"
+        
+        date_part = context.user_data.get("reschedule_new_date")
+        instructor_name = context.user_data.get("reschedule_instructor_name")
+        free_slots = get_available_time_slots(instructor_name, date_part)
+        
+        keyboard = []
+        for i in range(0, len(free_slots), 3):
+            row = [KeyboardButton(free_slots[j]) for j in range(i, min(i + 3, len(free_slots)))]
+            keyboard.append(row)
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        await update.message.reply_text(
+            f"🕐 Оберіть новий час на {date_part}:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    if text == "✅ Підтвердити перенесення":
+        request_id = context.user_data.get("reschedule_request_id")
+        new_date = context.user_data.get("reschedule_new_date")
+        new_time = context.user_data.get("reschedule_new_time")
+        
+        # Конвертуємо дату в формат YYYY-MM-DD для БД
+        date_obj = datetime.strptime(new_date, "%d.%m.%Y")
+        new_date_db = date_obj.strftime("%Y-%m-%d")
+        
+        if accept_reschedule_request(request_id, new_date_db, new_time):
+            old_date = context.user_data.get("reschedule_old_date")
+            old_time = context.user_data.get("reschedule_old_time")
+            instructor_name = context.user_data.get("reschedule_instructor_name")
+            duration = context.user_data.get("reschedule_duration")
+            instructor_id = context.user_data.get("reschedule_instructor_id")
+            
+            await update.message.reply_text(
+                f"✅ *Заняття успішно перенесено!*\n\n"
+                f"🗓 *Старий час:*\n"
+                f"📅 {old_date} о {old_time}\n\n"
+                f"🆕 *Новий час:*\n"
+                f"📅 {new_date} о {new_time}\n\n"
+                f"👨‍🏫 Інструктор: {instructor_name}\n"
+                f"⏱ Тривалість: {duration}",
+                reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📋 Мої записи")]], resize_keyboard=True),
+                parse_mode="Markdown"
+            )
+            
+            # Повідомляємо інструктора
+            try:
+                await context.bot.send_message(
+                    chat_id=instructor_id,
+                    text=f"✅ *Учень погодився на перенесення!*\n\n"
+                         f"🗓 Старий час: {old_date} о {old_time}\n"
+                         f"🆕 Новий час: {new_date} о {new_time}\n\n"
+                         f"Тепер ви можете заблокувати старий час через\n"
+                         f"⚙️ Управління графіком",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify instructor: {e}")
+        else:
+            await update.message.reply_text("❌ Помилка перенесення. Спробуйте пізніше.")
+        
+        context.user_data.clear()
+
 # ======================= MAIN =======================
 def main():
     try:
@@ -1994,6 +2404,7 @@ def main():
         init_students_table()
         migrate_database()
         init_schedule_blocks_table()
+        init_reschedule_requests_table()
         
         # Автоматично додаємо інструкторів якщо їх немає
         ensure_instructors_exist()
