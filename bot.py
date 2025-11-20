@@ -276,21 +276,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             student = get_student_by_telegram_id(user_id)
             
             if student:
-                # Вже зареєстрований - одразу до вибору коробки
+                # Вже зареєстрований - показуємо меню
                 context.user_data["student_name"] = student[1]
                 context.user_data["student_phone"] = student[2]
                 context.user_data["student_tariff"] = student[3]
-                context.user_data["state"] = "waiting_for_transmission"
                 
                 keyboard = [
-                    [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")],
-                    [KeyboardButton("📖 Мої записи")]
+                    [KeyboardButton("🚀 Записатися на заняття")],
+                    [KeyboardButton("📋 Мої записи")]
                 ]
                 
                 await update.message.reply_text(
                     f"Привіт, {student[1]}! 👋\n\n"
                     f"💰 Ваш тариф: {student[3]} грн/год\n\n"
-                    f"Оберіть тип коробки передач:",
+                    f"Що бажаєте зробити?",
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
             else:
@@ -412,13 +411,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             tariff = context.user_data["registration_tariff"]
             
             if register_student(name, phone, user_id, tariff, f"link_{tariff}"):
+                # Кнопка для переходу до бронювання
+                keyboard = [
+                    [KeyboardButton("🚀 Записатися на заняття")],
+                    [KeyboardButton("📋 Мої записи")]
+                ]
+                
                 await update.message.reply_text(
                     f"✅ *Реєстрацію завершено!*\n\n"
                     f"👤 Ім'я: {name}\n"
                     f"📱 Телефон: {phone}\n"
                     f"💰 Ваш тариф: *{tariff} грн/год* (фіксований)\n\n"
                     f"ℹ️ Тариф закріплений за вами і не змінюється.\n\n"
-                    f"Тепер ви можете записатися на заняття через /start",
+                    f"Натисніть кнопку нижче, щоб записатися на заняття:",
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
                     parse_mode="Markdown"
                 )
             else:
@@ -490,7 +496,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # === МЕНЮ СТУДЕНТА ===
-        if text == "📖 Мої записи":
+        if text == "🚀 Записатися на заняття":
+            # Показати вибір типу коробки
+            keyboard = [
+                [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")]
+            ]
+            context.user_data["state"] = "waiting_for_transmission"
+            
+            await update.message.reply_text(
+                "🚗 Оберіть тип коробки передач:",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+            return
+        
+        if text == "📖 Мої записи" or text == "📋 Мої записи":
             await show_student_lessons(update, context)
             return
         
