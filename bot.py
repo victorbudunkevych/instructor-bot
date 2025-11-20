@@ -1641,6 +1641,8 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         date_obj = datetime.strptime(block_date, "%d.%m.%Y")
         date_formatted = date_obj.strftime("%Y-%m-%d")
         
+        logger.info(f"🔍 Перевіряю конфлікти для інструктора {instructor_id}, дата {date_formatted}, час {time_start}-{time_end}")
+        
         # ⚠️ ПЕРЕВІРЯЄМО ЧИ Є ЗАПИСИ НА ЦЕЙ ЧАС
         start_hour = int(time_start.split(':')[0])
         end_hour = int(time_end.split(':')[0])
@@ -1649,9 +1651,15 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         conflicting_lessons = []
         for hour in range(start_hour, end_hour):
             time_slot = f"{hour:02d}:00"
+            logger.info(f"  🔎 Перевіряю час {time_slot}...")
             lesson = get_lesson_by_instructor_datetime(instructor_id, date_formatted, time_slot)
             if lesson:
+                logger.info(f"  ⚠️ ЗНАЙДЕНО КОНФЛІКТ: {lesson}")
                 conflicting_lessons.append((time_slot, lesson))
+            else:
+                logger.info(f"  ✅ Час {time_slot} вільний")
+        
+        logger.info(f"📊 Всього конфліктів: {len(conflicting_lessons)}")
         
         if conflicting_lessons:
             # Є записи - пропонуємо перенести ПЕРШЕ заняття
