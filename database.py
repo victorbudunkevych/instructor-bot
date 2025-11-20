@@ -706,15 +706,25 @@ def reject_reschedule_request(request_id):
         return False
 
 def get_lesson_by_instructor_datetime(instructor_id, date, time):
-    """Отримати урок за інструктором, датою і часом"""
+    """Отримати урок за інструктором, датою і часом
+    date може бути в форматі YYYY-MM-DD або DD.MM.YYYY
+    """
     try:
+        # Конвертуємо дату в формат DD.MM.YYYY якщо потрібно
+        if '-' in date:  # Формат YYYY-MM-DD
+            from datetime import datetime
+            date_obj = datetime.strptime(date, "%Y-%m-%d")
+            date_formatted = date_obj.strftime("%d.%m.%Y")
+        else:  # Вже в форматі DD.MM.YYYY
+            date_formatted = date
+        
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, student_name, student_telegram_id, duration, student_tariff
                 FROM lessons
                 WHERE instructor_id = ? AND date = ? AND time = ? AND status = 'active'
-            """, (instructor_id, date, time))
+            """, (instructor_id, date_formatted, time))
             return cursor.fetchone()
     except Exception as e:
         logger.error(f"Помилка get_lesson_by_instructor_datetime: {e}")
