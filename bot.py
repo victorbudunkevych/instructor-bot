@@ -510,7 +510,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⚠️ Оберіть коробку передач із меню.")
                 return
             
-            transmission = "автомат" if text == "🚗 Автомат" else "механіка"
+            transmission = "Автомат" if text == "🚗 Автомат" else "Механіка"
             context.user_data["transmission"] = transmission
             context.user_data["state"] = "waiting_for_instructor"
 
