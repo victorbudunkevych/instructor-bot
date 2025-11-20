@@ -441,6 +441,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_admin_panel(update, context)
             return
         
+        if state == "admin_panel":
+            await handle_admin_report(update, context)
+            return
+        
         if state == "admin_report_period":
             await handle_admin_report(update, context)
             return
