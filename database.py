@@ -50,8 +50,6 @@ def init_db():
                     transmission_type TEXT NOT NULL,
                     telegram_id INTEGER UNIQUE,
                     phone TEXT,
-                    price_per_hour INTEGER DEFAULT 400,
-                    is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -175,6 +173,54 @@ def init_students_table():
         logger.info("✅ Таблиця students готова")
     except Exception as e:
         logger.error(f"Помилка init_students_table: {e}")
+        raise
+
+def init_reschedule_requests_table():
+    """НОВА: Створення таблиці запитів на перенесення"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS reschedule_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    lesson_id INTEGER NOT NULL,
+                    instructor_id INTEGER NOT NULL,
+                    instructor_name TEXT NOT NULL,
+                    student_telegram_id INTEGER NOT NULL,
+                    student_name TEXT NOT NULL,
+                    old_date TEXT NOT NULL,
+                    old_time TEXT NOT NULL,
+                    duration TEXT NOT NULL,
+                    new_date TEXT,
+                    new_time TEXT,
+                    status TEXT DEFAULT 'pending',
+                    reason TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    responded_at TIMESTAMP,
+                    FOREIGN KEY (lesson_id) REFERENCES lessons(id),
+                    FOREIGN KEY (instructor_id) REFERENCES instructors(id)
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reschedule_lesson 
+                ON reschedule_requests(lesson_id)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reschedule_status 
+                ON reschedule_requests(status)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reschedule_student 
+                ON reschedule_requests(student_telegram_id)
+            """)
+            
+            conn.commit()
+        logger.info("✅ Таблиця reschedule_requests готова")
+    except Exception as e:
+        logger.error(f"Помилка init_reschedule_requests_table: {e}")
         raise
 
 def migrate_database():
@@ -573,4 +619,103 @@ def get_student_by_telegram_id(telegram_id):
             return cursor.fetchone()
     except Exception as e:
         logger.error(f"Помилка get_student_by_telegram_id: {e}")
+        return None
+
+# ======================= ЗАПИТИ - ПЕРЕНЕСЕННЯ =======================
+def create_reschedule_request(lesson_id, instructor_id, instructor_name, student_telegram_id, student_name, old_date, old_time, duration, reason=""):
+    """Створити запит на перенесення заняття"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO reschedule_requests 
+                (lesson_id, instructor_id, instructor_name, student_telegram_id, student_name, old_date, old_time, duration, reason, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """, (lesson_id, instructor_id, instructor_name, student_telegram_id, student_name, old_date, old_time, duration, reason))
+            conn.commit()
+            return cursor.lastrowid
+    except Exception as e:
+        logger.error(f"Помилка create_reschedule_request: {e}")
+        return None
+
+def get_pending_reschedule_by_student(student_telegram_id):
+    """Отримати активний запит на перенесення для учня"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, lesson_id, instructor_name, old_date, old_time, duration, created_at, instructor_id
+                FROM reschedule_requests
+                WHERE student_telegram_id = ? AND status = 'pending'
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (student_telegram_id,))
+            return cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Помилка get_pending_reschedule_by_student: {e}")
+        return None
+
+def accept_reschedule_request(request_id, new_date, new_time):
+    """Прийняти запит на перенесення"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Оновлюємо запит
+            cursor.execute("""
+                UPDATE reschedule_requests
+                SET status = 'accepted', new_date = ?, new_time = ?, responded_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (new_date, new_time, request_id))
+            
+            # Отримуємо lesson_id
+            cursor.execute("SELECT lesson_id FROM reschedule_requests WHERE id = ?", (request_id,))
+            result = cursor.fetchone()
+            if not result:
+                return False
+            
+            lesson_id = result[0]
+            
+            # Оновлюємо урок
+            cursor.execute("""
+                UPDATE lessons
+                SET date = ?, time = ?
+                WHERE id = ?
+            """, (new_date, new_time, lesson_id))
+            
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Помилка accept_reschedule_request: {e}")
+        return False
+
+def reject_reschedule_request(request_id):
+    """Відхилити запит на перенесення"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE reschedule_requests
+                SET status = 'rejected', responded_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (request_id,))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Помилка reject_reschedule_request: {e}")
+        return False
+
+def get_lesson_by_instructor_datetime(instructor_id, date, time):
+    """Отримати урок за інструктором, датою і часом"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, student_name, student_telegram_id, duration, student_tariff
+                FROM lessons
+                WHERE instructor_id = ? AND date = ? AND time = ? AND status = 'active'
+            """, (instructor_id, date, time))
+            return cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Помилка get_lesson_by_instructor_datetime: {e}")
         return None
