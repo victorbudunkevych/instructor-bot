@@ -50,6 +50,8 @@ def init_db():
                     transmission_type TEXT NOT NULL,
                     telegram_id INTEGER UNIQUE,
                     phone TEXT,
+                    price_per_hour INTEGER DEFAULT 400,
+                    is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
