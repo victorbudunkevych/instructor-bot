@@ -95,7 +95,7 @@ def ensure_instructors_exist():
             cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (telegram_id,))
             if not cursor.fetchone():
                 cursor.execute("""
-                    INSERT INTO instructors (telegram_id, name, phone, transmission, price_per_hour, is_active, created_at)
+                    INSERT INTO instructors (telegram_id, name, phone, transmission_type, price_per_hour, is_active, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (telegram_id, name, phone, transmission, price, 1, datetime.now()))
                 logger.info(f"✅ Додано інструктора: {name} ({transmission})")
