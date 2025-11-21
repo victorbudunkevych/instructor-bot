@@ -1460,7 +1460,9 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
     
     # === ОБРОБКА КОНФЛІКТУ ПРИ БЛОКУВАННІ ===
     if state == "block_with_conflict":
+        logger.info(f"🔧 Обробка block_with_conflict, text='{text}'")
         if text == "🔄 Запропонувати перенести":
+            logger.info("✅ Кнопка перенесення натиснута")
             user_id = update.message.from_user.id
             instructor_data = get_instructor_by_telegram_id(user_id)
             
@@ -1477,6 +1479,8 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
             time = context.user_data.get("temp_lesson_time")
             duration = context.user_data.get("temp_duration")
             
+            logger.info(f"📋 Дані для запиту: lesson={lesson_id}, student={student_name}, date={date}, time={time}")
+            
             # Створюємо запит на перенесення
             request_id = create_reschedule_request(
                 lesson_id, 
@@ -1490,6 +1494,8 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
                 "Інструктор хоче заблокувати цей час"
             )
             
+            logger.info(f"💾 Запит створено: request_id={request_id}")
+            
             if request_id:
                 # Відправляємо учню
                 try:
@@ -1501,6 +1507,8 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
                     # Форматуємо дату для показу
                     date_obj = datetime.strptime(date, "%Y-%m-%d")
                     date_display = date_obj.strftime("%d.%m.%Y")
+                    
+                    logger.info(f"📨 Відправляю повідомлення учню {student_telegram_id}")
                     
                     await context.bot.send_message(
                         chat_id=student_telegram_id,
@@ -1514,6 +1522,8 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
                         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True),
                         parse_mode="Markdown"
                     )
+                    
+                    logger.info("✅ Повідомлення учню відправлено успішно!")
                     
                     # Встановлюємо стан для учня через context (буде працювати коли учень відповість)
                     # Зберігаємо в БД що запит pending
