@@ -2539,7 +2539,7 @@ def main():
         bot_thread.start()
         
         # Запускаємо HTTP сервер на порту 10000 (для Render)
-        port = int(os.environ.get('PORT', 8080))
+        port = int(os.environ.get('PORT', 10000))
         server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
         logger.info(f"🌐 HTTP сервер запущено на порту {port}")
         print(f"🌐 HTTP сервер запущено на порту {port}")
