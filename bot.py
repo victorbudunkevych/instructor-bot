@@ -475,8 +475,8 @@ async def register_student_with_tariff(update: Update, context: ContextTypes.DEF
 
         # === УПРАВЛІННЯ ГРАФІКОМ ===
         # 🔥 ДОДАНО "block_with_conflict" В СПИСОК
-        if state in ["schedule_menu", "block_choose_date", "block_choose_time_start", 
-                     "block_choose_time_end", "block_choose_reason", "unblock_choose_date", "block_with_conflict"]:
+        if state in ["schedule_menu", "block_choose_date", "block_choose_time_start", \
+             "block_choose_time_end", "block_choose_reason", "unblock_choose_date", "block_with_conflict"]:
             await handle_schedule_management(update, context)
             return
 
