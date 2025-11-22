@@ -142,18 +142,31 @@ def get_available_time_slots(instructor_name, date_str):
         
         instructor_id = instructor_data[0]
         
-        # Перевіряємо чи це сьогодні
+        # Перевіряємо чи це сьогодні з урахуванням часової зони
         date_obj = datetime.strptime(date_str, "%d.%m.%Y")
-        is_today = date_obj.date() == datetime.now().date()
-        current_hour = datetime.now().hour
+        now = datetime.now(TZ)
+        is_today = date_obj.date() == now.date()
+        current_hour = now.hour
+        current_minute = now.minute
         
         # Всі можливі слоти
         all_slots = []
         start_hour = WORK_HOURS_START
         
-        # Якщо це сьогодні - починаємо з наступної години
+        # Якщо це сьогодні - мінімум через годину від поточного часу
         if is_today:
-            start_hour = max(current_hour + 1, WORK_HOURS_START)
+            # Якщо зараз 14:30, то наступний доступний слот - 16:00 (мінімум +1 година)
+            # Якщо зараз 14:00, то наступний доступний - 15:00
+            if current_minute > 0:
+                # Якщо є хвилини, додаємо ще 1 годину
+                start_hour = max(current_hour + 2, WORK_HOURS_START)
+            else:
+                # Якщо рівно година (наприклад 14:00), то +1 година
+                start_hour = max(current_hour + 1, WORK_HOURS_START)
+            
+            # Якщо вже пізно - немає вільних слотів
+            if start_hour >= WORK_HOURS_END:
+                return []
         
         hour = start_hour
         while hour < WORK_HOURS_END:
@@ -718,6 +731,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["state"] = "waiting_for_date"
                 await update.message.reply_text("📅 Введіть іншу дату (ДД.ММ.РРРР):")
                 return
+            
+            # === ПЕРЕВІРКА НА МИНУЛИЙ ЧАС ===
+            selected_date = context.user_data.get("date")
+            selected_time = text
+            
+            try:
+                # Парсимо дату і час
+                date_obj = datetime.strptime(selected_date, "%d.%m.%Y")
+                time_obj = datetime.strptime(selected_time, "%H:%M")
+                
+                # Комбінуємо в один datetime
+                selected_datetime = datetime(
+                    date_obj.year, date_obj.month, date_obj.day,
+                    time_obj.hour, time_obj.minute,
+                    tzinfo=TZ
+                )
+                
+                # Поточний час
+                now = datetime.now(TZ)
+                
+                # Мінімальний дозволений час = зараз + 1 година
+                min_allowed_time = now + timedelta(hours=1)
+                
+                # Перевіряємо чи не занадто близько
+                if selected_datetime < min_allowed_time:
+                    await update.message.reply_text(
+                        "⚠️ *Запис має бути мінімум за 1 годину!*\n\n"
+                        "Будь ласка, оберіть інший час.\n\n"
+                        f"Зараз: {now.strftime('%H:%M')}\n"
+                        f"Мінімальний час: {min_allowed_time.strftime('%H:%M')}",
+                        parse_mode="Markdown"
+                    )
+                    return
+                    
+            except Exception as e:
+                logger.error(f"Error checking past time: {e}")
             
             context.user_data["time"] = text
             context.user_data["state"] = "waiting_for_duration"
