@@ -1,4 +1,9 @@
-# database.py - ОНОВЛЕНА ВЕРСІЯ З НОВИМИ ФУНКЦІЯМИ
+# database.py - ВИПРАВЛЕНА ВЕРСІЯ (ЕТАП 1)
+# Додано нові функції:
+# 1. check_student_has_booking_at_time() - перевірка дублювання записів
+# 2. count_student_bookings_on_date() - підрахунок записів на день
+# 3. can_block_time_slot() - перевірка можливості блокування часу
+
 import sqlite3
 import logging
 from contextlib import contextmanager
@@ -50,6 +55,8 @@ def init_db():
                     transmission_type TEXT NOT NULL,
                     telegram_id INTEGER UNIQUE,
                     phone TEXT,
+                    price_per_hour INTEGER DEFAULT 400,
+                    is_active INTEGER DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -105,6 +112,10 @@ def init_lessons_table():
                 CREATE INDEX IF NOT EXISTS idx_lessons_status 
                 ON lessons(status)
             """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lessons_datetime 
+                ON lessons(date, time)
+            """)
             
             conn.commit()
         logger.info("✅ Таблиця lessons готова")
@@ -148,7 +159,7 @@ def init_schedule_blocks_table():
         raise
 
 def init_students_table():
-    """НОВА: Створення таблиці учнів"""
+    """Створення таблиці учнів"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -175,78 +186,13 @@ def init_students_table():
         logger.error(f"Помилка init_students_table: {e}")
         raise
 
-def init_reschedule_requests_table():
-    """НОВА: Створення таблиці запитів на перенесення"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS reschedule_requests (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    lesson_id INTEGER NOT NULL,
-                    instructor_id INTEGER NOT NULL,
-                    instructor_name TEXT NOT NULL,
-                    student_telegram_id INTEGER NOT NULL,
-                    student_name TEXT NOT NULL,
-                    old_date TEXT NOT NULL,
-                    old_time TEXT NOT NULL,
-                    duration TEXT NOT NULL,
-                    new_date TEXT,
-                    new_time TEXT,
-                    status TEXT DEFAULT 'pending',
-                    reason TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    responded_at TIMESTAMP,
-                    FOREIGN KEY (lesson_id) REFERENCES lessons(id),
-                    FOREIGN KEY (instructor_id) REFERENCES instructors(id)
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_reschedule_lesson 
-                ON reschedule_requests(lesson_id)
-            """)
-            
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_reschedule_status 
-                ON reschedule_requests(status)
-            """)
-            
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_reschedule_student 
-                ON reschedule_requests(student_telegram_id)
-            """)
-            
-            conn.commit()
-        logger.info("✅ Таблиця reschedule_requests готова")
-    except Exception as e:
-        logger.error(f"Помилка init_reschedule_requests_table: {e}")
-        raise
-
 def migrate_database():
     """Додавання нових полів до існуючої БД"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # === МІГРАЦІЯ INSTRUCTORS ===
-            cursor.execute("PRAGMA table_info(instructors)")
-            existing_instructors_cols = {row[1] for row in cursor.fetchall()}
-            
-            instructors_new_cols = {
-                'price_per_hour': 'INTEGER DEFAULT 400',
-                'is_active': 'INTEGER DEFAULT 1'
-            }
-            
-            for col, col_type in instructors_new_cols.items():
-                if col not in existing_instructors_cols:
-                    try:
-                        cursor.execute(f"ALTER TABLE instructors ADD COLUMN {col} {col_type}")
-                        logger.info(f"✅ Додано поле instructors.{col}")
-                    except sqlite3.OperationalError as e:
-                        logger.debug(f"Поле {col} вже існує або помилка: {e}")
-            
-            # === МІГРАЦІЯ LESSONS ===
+            # Перевіряємо які поля є в lessons
             cursor.execute("PRAGMA table_info(lessons)")
             existing_cols = {row[1] for row in cursor.fetchall()}
             
@@ -270,7 +216,7 @@ def migrate_database():
                 if col not in existing_cols:
                     try:
                         cursor.execute(f"ALTER TABLE lessons ADD COLUMN {col} {col_type}")
-                        logger.info(f"✅ Додано поле lessons.{col}")
+                        logger.info(f"✅ Додано поле: {col}")
                     except sqlite3.OperationalError as e:
                         logger.debug(f"Поле {col} вже існує або помилка: {e}")
             
@@ -278,78 +224,66 @@ def migrate_database():
             cursor.execute("UPDATE lessons SET status = 'active' WHERE status IS NULL")
             conn.commit()
             
-        logger.info("✅ Міграція БД завершена")
+        logger.info("✅ Міграція завершена")
     except Exception as e:
         logger.error(f"Помилка migrate_database: {e}")
 
 # ======================= ЗАПИТИ - ІНСТРУКТОРИ =======================
 def get_instructors_by_transmission(transmission_type):
-    """Отримати інструкторів за типом коробки"""
+    """Отримати список інструкторів за типом трансмісії"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT DISTINCT name FROM instructors WHERE transmission_type = ? ORDER BY name",
-                (transmission_type,)
-            )
-            return [row[0] for row in cursor.fetchall()]
+            cursor.execute("""
+                SELECT id, name, phone, price_per_hour
+                FROM instructors
+                WHERE transmission_type = ? AND is_active = 1
+                ORDER BY name
+            """, (transmission_type,))
+            return cursor.fetchall()
     except Exception as e:
         logger.error(f"Помилка get_instructors_by_transmission: {e}")
         return []
 
 def get_instructor_by_name(name):
-    """Отримати ID та telegram_id інструктора"""
+    """Отримати інструктора за іменем"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, telegram_id FROM instructors WHERE name = ?",
-                (name,)
-            )
+            cursor.execute("""
+                SELECT id, name, phone, transmission_type, price_per_hour
+                FROM instructors
+                WHERE name = ?
+            """, (name,))
             return cursor.fetchone()
     except Exception as e:
         logger.error(f"Помилка get_instructor_by_name: {e}")
         return None
 
 def get_instructor_by_telegram_id(telegram_id):
-    """Отримати дані інструктора за telegram_id"""
+    """Отримати інструктора за Telegram ID"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, name FROM instructors WHERE telegram_id = ?",
-                (telegram_id,)
-            )
+            cursor.execute("""
+                SELECT id, name, phone, transmission_type, price_per_hour
+                FROM instructors
+                WHERE telegram_id = ?
+            """, (telegram_id,))
             return cursor.fetchone()
     except Exception as e:
         logger.error(f"Помилка get_instructor_by_telegram_id: {e}")
         return None
 
-def get_instructor_rating(instructor_name):
-    """Отримати середній рейтинг інструктора"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT AVG(rating)
-                FROM lessons l
-                JOIN instructors i ON l.instructor_id = i.id
-                WHERE i.name = ? AND l.rating IS NOT NULL
-            """, (instructor_name,))
-            result = cursor.fetchone()
-            return round(result[0], 1) if result and result[0] else 0
-    except Exception as e:
-        logger.error(f"Помилка get_instructor_rating: {e}")
-        return 0
-
 def get_all_instructors():
-    """НОВА: Отримати всіх інструкторів для звітності адміна"""
+    """Отримати всіх інструкторів"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, name, transmission_type, telegram_id
+                SELECT id, name, transmission_type, phone, price_per_hour
                 FROM instructors
+                WHERE is_active = 1
                 ORDER BY name
             """)
             return cursor.fetchall()
@@ -357,17 +291,27 @@ def get_all_instructors():
         logger.error(f"Помилка get_all_instructors: {e}")
         return []
 
-# ======================= ЗАПИТИ - БЛОКУВАННЯ РОЗКЛАДУ =======================
-def add_schedule_block(instructor_id, date, time_start, time_end, block_type, reason=""):
-    """Додати блокування часу"""
-    if not validate_date_format(date):
-        logger.error(f"Невірний формат дати: {date}")
-        return False
-    
-    if not validate_time_format(time_start) or not validate_time_format(time_end):
-        logger.error(f"Невірний формат часу: {time_start} - {time_end}")
-        return False
-    
+def get_instructor_rating(instructor_id):
+    """Отримати середню оцінку інструктора"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT AVG(rating), COUNT(*)
+                FROM lessons
+                WHERE instructor_id = ? AND rating IS NOT NULL
+            """, (instructor_id,))
+            result = cursor.fetchone()
+            avg_rating = result[0] if result[0] else 0
+            count = result[1]
+            return round(avg_rating, 1), count
+    except Exception as e:
+        logger.error(f"Помилка get_instructor_rating: {e}")
+        return 0, 0
+
+# ======================= ЗАПИТИ - БЛОКУВАННЯ ЧАСУ =======================
+def add_schedule_block(instructor_id, date, time_start, time_end, block_type='manual', reason=''):
+    """Додати блокування часу в графіку"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -383,7 +327,7 @@ def add_schedule_block(instructor_id, date, time_start, time_end, block_type, re
         return False
 
 def remove_schedule_block(block_id):
-    """Видалити блокування"""
+    """Видалити блокування часу"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -394,35 +338,78 @@ def remove_schedule_block(block_id):
         logger.error(f"Помилка remove_schedule_block: {e}")
         return False
 
-def get_schedule_blocks(instructor_id, date):
-    """Отримати всі блокування для дати"""
+def get_instructor_blocks(instructor_id):
+    """Отримати всі блокування інструктора"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, time_start, time_end, block_type, reason
+                SELECT id, date, time_start, time_end, reason
                 FROM schedule_blocks
-                WHERE instructor_id = ? AND date = ?
-                ORDER BY time_start
-            """, (instructor_id, date))
+                WHERE instructor_id = ?
+                ORDER BY date DESC, time_start
+            """, (instructor_id,))
             return cursor.fetchall()
     except Exception as e:
-        logger.error(f"Помилка get_schedule_blocks: {e}")
+        logger.error(f"Помилка get_instructor_blocks: {e}")
         return []
 
-def is_time_blocked(instructor_id, date, time_slot):
-    """Перевірити чи заблокований час"""
+def is_time_blocked(instructor_id, date, time):
+    """Перевірка чи заблокований час"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id FROM schedule_blocks
-                WHERE instructor_id = ? AND date = ? 
-                AND time_start <= ? AND time_end > ?
-            """, (instructor_id, date, time_slot, time_slot))
-            return cursor.fetchone() is not None
+                SELECT COUNT(*) FROM schedule_blocks
+                WHERE instructor_id = ?
+                AND date = ?
+                AND time_start <= ?
+                AND time_end > ?
+            """, (instructor_id, date, time, time))
+            count = cursor.fetchone()[0]
+            return count > 0
     except Exception as e:
         logger.error(f"Помилка is_time_blocked: {e}")
+        return False
+
+def can_block_time_slot(instructor_id, date, time_start, time_end):
+    """
+    ✅ НОВА ФУНКЦІЯ: Перевірка чи можна заблокувати час
+    Повертає False якщо на цей час вже є записи учнів
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Конвертуємо дату в формат який зберігається в БД
+            # Припускаємо що date в форматі YYYY-MM-DD, а в lessons - DD.MM.YYYY
+            try:
+                date_obj = datetime.strptime(date, '%Y-%m-%d')
+                date_formatted = date_obj.strftime('%d.%m.%Y')
+            except:
+                # Якщо дата вже в форматі DD.MM.YYYY
+                date_formatted = date
+            
+            # Перевіряємо чи є активні заняття в цьому проміжку
+            cursor.execute("""
+                SELECT COUNT(*) FROM lessons
+                WHERE instructor_id = ? 
+                  AND date = ?
+                  AND status = 'active'
+                  AND time >= ?
+                  AND time < ?
+            """, (instructor_id, date_formatted, time_start, time_end))
+            
+            count = cursor.fetchone()[0]
+            
+            if count > 0:
+                logger.warning(f"Не можна заблокувати {date} {time_start}-{time_end}: є {count} активних записів")
+                return False
+            
+            return True
+            
+    except Exception as e:
+        logger.error(f"Помилка can_block_time_slot: {e}", exc_info=True)
         return False
 
 # ======================= ЗАПИТИ - ЗАНЯТТЯ =======================
@@ -468,8 +455,59 @@ def is_time_slot_available(instructor_id, date, start_time, duration):
     
     return True
 
+def check_student_has_booking_at_time(student_telegram_id, date, time):
+    """
+    ✅ НОВА ФУНКЦІЯ: Перевірка чи учень вже має запис на цей час
+    Повертає True якщо учень вже записаний на цей час у будь-якого інструктора
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM lessons
+                WHERE student_telegram_id = ?
+                  AND date = ?
+                  AND time = ?
+                  AND status = 'active'
+            """, (student_telegram_id, date, time))
+            
+            count = cursor.fetchone()[0]
+            
+            if count > 0:
+                logger.info(f"Учень {student_telegram_id} вже має запис на {date} {time}")
+                return True
+            
+            return False
+            
+    except Exception as e:
+        logger.error(f"Помилка check_student_has_booking_at_time: {e}")
+        return False
+
+def count_student_bookings_on_date(student_telegram_id, date):
+    """
+    ✅ НОВА ФУНКЦІЯ: Підрахунок кількості записів учня на конкретну дату
+    Повертає кількість активних записів
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM lessons
+                WHERE student_telegram_id = ?
+                  AND date = ?
+                  AND status = 'active'
+            """, (student_telegram_id, date))
+            
+            count = cursor.fetchone()[0]
+            logger.info(f"Учень {student_telegram_id} має {count} записів на {date}")
+            return count
+            
+    except Exception as e:
+        logger.error(f"Помилка count_student_bookings_on_date: {e}")
+        return 0
+
 def update_lesson(lesson_id, **kwargs):
-    """НОВА: Оновити дані заняття (для коригування графіку)"""
+    """Оновити дані заняття"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -491,7 +529,7 @@ def update_lesson(lesson_id, **kwargs):
         return False
 
 def add_lesson_rating(lesson_id, rating, feedback=""):
-    """НОВА: Додати оцінку після завершення уроку"""
+    """Додати оцінку після завершення уроку"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -508,7 +546,7 @@ def add_lesson_rating(lesson_id, rating, feedback=""):
 
 # ======================= ЗАПИТИ - СТАТИСТИКА =======================
 def get_instructor_stats_period(instructor_id, date_from, date_to):
-    """НОВА: Статистика інструктора за період"""
+    """Статистика інструктора за період"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -565,7 +603,7 @@ def get_instructor_stats_period(instructor_id, date_from, date_to):
         return None
 
 def get_admin_report_by_instructors(date_from, date_to):
-    """НОВА: Звіт для адміна по всіх інструкторах за період"""
+    """Звіт для адміна по всіх інструкторах за період"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -593,7 +631,7 @@ def get_admin_report_by_instructors(date_from, date_to):
 
 # ======================= ЗАПИТИ - УЧНІ =======================
 def register_student(name, phone, telegram_id, tariff, registered_via="direct"):
-    """НОВА: Реєстрація учня"""
+    """Реєстрація учня"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -624,7 +662,7 @@ def register_student(name, phone, telegram_id, tariff, registered_via="direct"):
         return False
 
 def get_student_by_telegram_id(telegram_id):
-    """НОВА: Отримати дані учня"""
+    """Отримати дані учня"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -636,113 +674,4 @@ def get_student_by_telegram_id(telegram_id):
             return cursor.fetchone()
     except Exception as e:
         logger.error(f"Помилка get_student_by_telegram_id: {e}")
-        return None
-
-# ======================= ЗАПИТИ - ПЕРЕНЕСЕННЯ =======================
-def create_reschedule_request(lesson_id, instructor_id, instructor_name, student_telegram_id, student_name, old_date, old_time, duration, reason=""):
-    """Створити запит на перенесення заняття"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO reschedule_requests 
-                (lesson_id, instructor_id, instructor_name, student_telegram_id, student_name, old_date, old_time, duration, reason, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
-            """, (lesson_id, instructor_id, instructor_name, student_telegram_id, student_name, old_date, old_time, duration, reason))
-            conn.commit()
-            return cursor.lastrowid
-    except Exception as e:
-        logger.error(f"Помилка create_reschedule_request: {e}")
-        return None
-
-def get_pending_reschedule_by_student(student_telegram_id):
-    """Отримати активний запит на перенесення для учня"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, lesson_id, instructor_name, old_date, old_time, duration, created_at, instructor_id
-                FROM reschedule_requests
-                WHERE student_telegram_id = ? AND status = 'pending'
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (student_telegram_id,))
-            return cursor.fetchone()
-    except Exception as e:
-        logger.error(f"Помилка get_pending_reschedule_by_student: {e}")
-        return None
-
-def accept_reschedule_request(request_id, new_date, new_time):
-    """Прийняти запит на перенесення"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            
-            # Оновлюємо запит
-            cursor.execute("""
-                UPDATE reschedule_requests
-                SET status = 'accepted', new_date = ?, new_time = ?, responded_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (new_date, new_time, request_id))
-            
-            # Отримуємо lesson_id
-            cursor.execute("SELECT lesson_id FROM reschedule_requests WHERE id = ?", (request_id,))
-            result = cursor.fetchone()
-            if not result:
-                return False
-            
-            lesson_id = result[0]
-            
-            # Оновлюємо урок
-            cursor.execute("""
-                UPDATE lessons
-                SET date = ?, time = ?
-                WHERE id = ?
-            """, (new_date, new_time, lesson_id))
-            
-            conn.commit()
-            return True
-    except Exception as e:
-        logger.error(f"Помилка accept_reschedule_request: {e}")
-        return False
-
-def reject_reschedule_request(request_id):
-    """Відхилити запит на перенесення"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE reschedule_requests
-                SET status = 'rejected', responded_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            """, (request_id,))
-            conn.commit()
-            return True
-    except Exception as e:
-        logger.error(f"Помилка reject_reschedule_request: {e}")
-        return False
-
-def get_lesson_by_instructor_datetime(instructor_id, date, time):
-    """Отримати урок за інструктором, датою і часом
-    date може бути в форматі YYYY-MM-DD або DD.MM.YYYY
-    """
-    try:
-        # Конвертуємо дату в формат DD.MM.YYYY якщо потрібно
-        if '-' in date:  # Формат YYYY-MM-DD
-            from datetime import datetime
-            date_obj = datetime.strptime(date, "%Y-%m-%d")
-            date_formatted = date_obj.strftime("%d.%m.%Y")
-        else:  # Вже в форматі DD.MM.YYYY
-            date_formatted = date
-        
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, student_name, student_telegram_id, duration, student_tariff
-                FROM lessons
-                WHERE instructor_id = ? AND date = ? AND time = ? AND status = 'active'
-            """, (instructor_id, date_formatted, time))
-            return cursor.fetchone()
-    except Exception as e:
-        logger.error(f"Помилка get_lesson_by_instructor_datetime: {e}")
         return None
