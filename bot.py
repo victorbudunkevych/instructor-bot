@@ -463,11 +463,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await start(update, context)
                 return
         
-        if text == "📅 Мій розклад":
+        # ✅ ОБРОБНИКИ КНОПОК ІНСТРУКТОРА
+        if text == "📅 Мій розклад" or text == "📅 Мій графік":
             await show_instructor_schedule(update, context)
             return
-        elif text == "⚙️ Управління графіком":
+        elif text == "⚙️ Управління графіком" or text == "🔒 Блокувати час":
             await manage_schedule(update, context)
+            return
+        elif text == "🔓 Мої блокування":
+            await show_blocks_to_unblock(update, context)
+            return
+        elif text == "📋 Мої заняття":
+            await show_instructor_schedule(update, context)
             return
         elif text == "📊 Моя статистика":
             await show_instructor_stats_menu(update, context)
