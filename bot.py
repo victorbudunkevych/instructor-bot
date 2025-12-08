@@ -1826,7 +1826,17 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Помилка: інструктор не знайдений.")
             return
         
-        instructor_id, instructor_telegram_id = instructor_data
+        # ✅ ВИПРАВЛЕНО: Розпаковуємо правильно (id, name, phone, transmission, price)
+        instructor_id = instructor_data[0]
+        
+        # Отримуємо telegram_id окремо з бази
+        instructor_telegram_id = None
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT telegram_id FROM instructors WHERE id = ?", (instructor_id,))
+            result = cursor.fetchone()
+            if result:
+                instructor_telegram_id = result[0]
         
         with get_db() as conn:
             cursor = conn.cursor()
