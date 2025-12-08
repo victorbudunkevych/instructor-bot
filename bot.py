@@ -545,12 +545,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             keyboard = []
             for instructor in instructors:
-                rating = get_instructor_rating(instructor)
-                if rating > 0:
-                    stars = "⭐" * int(rating)
-                    keyboard.append([f"{instructor} {stars} ({rating:.1f})"])
+                instructor_id = instructor[0]  # ✅ Беремо ID
+                instructor_name = instructor[1]  # ✅ Беремо ім'я
+                avg_rating, count = get_instructor_rating(instructor_id)
+                if avg_rating > 0:
+                    stars = "⭐" * int(avg_rating)
+                    keyboard.append([f"{instructor_name} {stars} ({avg_rating:.1f})"])
                 else:
-                    keyboard.append([f"{instructor} 🆕"])
+                    keyboard.append([f"{instructor_name} 🆕"])
             
             keyboard.append([KeyboardButton("🔙 Назад")])
             
@@ -607,12 +609,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 keyboard = []
                 for instructor in instructors:
-                    rating = get_instructor_rating(instructor)
-                    if rating > 0:
-                        stars = "⭐" * int(rating)
-                        keyboard.append([f"{instructor} {stars} ({rating:.1f})"])
+                    instructor_id = instructor[0]  # ✅ Беремо ID
+                    instructor_name = instructor[1]  # ✅ Беремо ім'я
+                    avg_rating, count = get_instructor_rating(instructor_id)
+                    if avg_rating > 0:
+                        stars = "⭐" * int(avg_rating)
+                        keyboard.append([f"{instructor_name} {stars} ({avg_rating:.1f})"])
                     else:
-                        keyboard.append([f"{instructor} 🆕"])
+                        keyboard.append([f"{instructor_name} 🆕"])
                 
                 keyboard.append([KeyboardButton("🔙 Назад")])
                 
