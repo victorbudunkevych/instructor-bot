@@ -51,6 +51,7 @@ from database import (
     get_instructor_by_telegram_id,
     get_instructor_rating,
     get_db,
+    init_schedule_blocks_table,
     get_instructor_stats_period,
     get_admin_report_by_instructors,
     get_all_instructors,
@@ -252,7 +253,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             keyboard = [
                 [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")],
                 [KeyboardButton("📅 Мій розклад")],
+                [KeyboardButton("⚙️ Управління графіком")],
                 [KeyboardButton("📊 Моя статистика")],
+                [KeyboardButton("❌ Історія скасувань")],
                 [KeyboardButton("⭐ Оцінити учня")]
             ]
             text = "Привіт! 👋 Я бот *Автоінструктор*.\n\n👨‍🏫 *Панель інструктора*\n\nОберіть дію:"
@@ -462,10 +465,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "📅 Мій розклад":
             await show_instructor_schedule(update, context)
             return
+        elif text == "⚙️ Управління графіком":
+            await manage_schedule(update, context)
             return
         elif text == "📊 Моя статистика":
             await show_instructor_stats_menu(update, context)
             return
+        elif text == "❌ Історія скасувань":
+            await show_cancellation_history(update, context)
             return
         elif text == "⭐ Оцінити учня":
             await rate_student_menu(update, context)
@@ -1062,6 +1069,50 @@ async def show_instructor_stats(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Error in show_instructor_stats: {e}", exc_info=True)
         await update.message.reply_text("❌ Помилка.")
 
+async def show_cancellation_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Історія скасувань"""
+    user_id = update.message.from_user.id
+    
+    try:
+        instructor_data = get_instructor_by_telegram_id(user_id)
+        if not instructor_data:
+            await update.message.reply_text("❌ Помилка.")
+            return
+        
+        instructor_id = instructor_data[0]
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT date, time, student_name, cancelled_by, cancelled_at
+                FROM lessons
+                WHERE instructor_id = ? AND status = 'cancelled'
+                ORDER BY cancelled_at DESC
+                LIMIT 10
+            """, (instructor_id,))
+            
+            cancellations = cursor.fetchall()
+        
+        if not cancellations:
+            await update.message.reply_text("📋 Немає скасованих занять.")
+            return
+        
+        text = "❌ *Історія скасувань:*\n\n"
+        
+        for date, time, student_name, cancelled_by, cancelled_at in cancellations:
+            text += f"📅 {date} {time}\n"
+            text += f"👤 {student_name}\n"
+            text += f"🚫 Скасував: {cancelled_by}\n"
+            if cancelled_at:
+                text += f"🕐 {cancelled_at[:16]}\n"
+            text += "\n"
+        
+        await update.message.reply_text(text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error in show_cancellation_history: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка.")
+
 # ======================= RATING FUNCTIONS =======================
 async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Меню оцінювання учнів"""
@@ -1308,6 +1359,284 @@ async def handle_edit_schedule(update: Update, context: ContextTypes.DEFAULT_TYP
         await start(update, context)
 
 # ======================= SCHEDULE MANAGEMENT =======================
+async def manage_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Управління графіком"""
+    keyboard = [
+        [KeyboardButton("🔴 Заблокувати час")],
+        [KeyboardButton("🟢 Розблокувати час")],
+        [KeyboardButton("📋 Мої блокування")],
+        [KeyboardButton("🔙 Назад")]
+    ]
+    
+    context.user_data["state"] = "schedule_menu"
+    
+    await update.message.reply_text(
+        "⚙️ *Управління графіком*\n\nОберіть дію:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_schedule_management(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка управління графіком"""
+    text = update.message.text
+    state = context.user_data.get("state")
+    
+    logger.info(f"🔧 handle_schedule_management: text='{text}', state='{state}'")
+    
+    if text == "🔙 Назад":
+        logger.info("⬅️ Назад натиснуто")
+        if state == "schedule_menu":
+            await start(update, context)
+        else:
+            await manage_schedule(update, context)
+        return
+    
+    # ВАЖЛИВО: перевірка кнопок меню має бути перед перевіркою стану!
+    if text == "🔴 Заблокувати час":
+        logger.info("🔴 Кнопка 'Заблокувати час' натиснута - показую календар")
+        context.user_data["state"] = "block_choose_date"
+        
+        # Генеруємо дати на 30 днів (місяць)
+        dates = get_next_dates(30)
+        
+        # Робимо кнопки по 2 в рядку
+        keyboard = []
+        for i in range(0, len(dates), 2):
+            row = [KeyboardButton(dates[i])]
+            if i + 1 < len(dates):
+                row.append(KeyboardButton(dates[i + 1]))
+            keyboard.append(row)
+        
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        await update.message.reply_text(
+            "📅 Оберіть дату для блокування (доступно на місяць вперед):",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    elif text == "🟢 Розблокувати час":
+        logger.info("🟢 Розблокувати час")
+        await show_blocks_to_unblock(update, context)
+        return
+    
+    elif text == "📋 Мої блокування":
+        logger.info("📋 Мої блокування")
+        await show_all_blocks(update, context)
+        return
+    
+    # Тепер обробка станів
+    logger.info(f"📍 Перевірка стану: {state}")
+    if state == "block_choose_date":
+        # Витягуємо дату з формату "Пн 13.12.2024"
+        date_parts = text.split()
+        if len(date_parts) == 2:
+            date_str = date_parts[1]  # "13.12.2024"
+        else:
+            date_str = text  # Якщо ввели вручну
+        
+        logger.info(f"📆 Обробка дати блокування: {date_str}")
+        
+        if not validate_date_format(date_str):
+            logger.warning(f"⚠️ Невірний формат дати: {date_str}")
+            await update.message.reply_text("⚠️ Невірний формат. Оберіть дату з меню.")
+            return
+        
+        context.user_data["block_date"] = date_str
+        context.user_data["state"] = "block_choose_time_start"
+        
+        # Показуємо години для вибору (8:00 - 18:00)
+        keyboard = []
+        for hour in range(WORK_HOURS_START, WORK_HOURS_END):
+            keyboard.append([KeyboardButton(f"{hour:02d}:00")])
+        
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        logger.info(f"💬 Відправляю вибір часу початку")
+        await update.message.reply_text(
+            "🕐 Оберіть час початку блокування:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    elif state == "block_choose_time_start":
+        logger.info(f"🕐 Обробка часу початку: {text}")
+        
+        if not re.match(r'^\d{1,2}:\d{2}$', text):
+            await update.message.reply_text("⚠️ Невірний формат. Оберіть час з меню.")
+            return
+        
+        context.user_data["block_time_start"] = text
+        context.user_data["state"] = "block_choose_time_end"
+        
+        # Показуємо години для кінця (від початку до 18:00)
+        start_hour = int(text.split(':')[0])
+        keyboard = []
+        for hour in range(start_hour + 1, WORK_HOURS_END + 1):
+            keyboard.append([KeyboardButton(f"{hour:02d}:00")])
+        
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        logger.info(f"💬 Відправляю вибір часу кінця")
+        await update.message.reply_text(
+            "🕐 Оберіть час кінця блокування:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    elif state == "block_choose_time_end":
+        logger.info(f"🕐 Обробка часу кінця: {text}")
+        
+        if not re.match(r'^\d{1,2}:\d{2}$', text):
+            await update.message.reply_text("⚠️ Невірний формат. Оберіть час з меню.")
+            return
+        
+        context.user_data["block_time_end"] = text
+        context.user_data["state"] = "block_choose_reason"
+        
+        keyboard = [
+            [KeyboardButton("➡️ Пропустити")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        
+        logger.info(f"💬 Запитую причину")
+        await update.message.reply_text(
+            "💬 Введіть причину блокування (або пропустіть):",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    elif state == "block_choose_reason":
+        reason = "" if text == "➡️ Пропустити" else text
+        
+        user_id = update.message.from_user.id
+        instructor_data = get_instructor_by_telegram_id(user_id)
+        
+        if not instructor_data:
+            await update.message.reply_text("❌ Помилка.")
+            return
+        
+        instructor_id = instructor_data[0]
+        block_date = context.user_data["block_date"]
+        time_start = context.user_data["block_time_start"]
+        time_end = context.user_data["block_time_end"]
+        
+        # Конвертуємо дату
+        date_obj = datetime.strptime(block_date, "%d.%m.%Y")
+        date_formatted = date_obj.strftime("%Y-%m-%d")
+        
+        from database import add_schedule_block
+        
+        if add_schedule_block(instructor_id, date_formatted, time_start, time_end, "blocked", reason):
+            await update.message.reply_text(
+                f"✅ Час заблоковано!\n\n"
+                f"📅 {block_date}\n"
+                f"🕐 {time_start} - {time_end}"
+            )
+        else:
+            await update.message.reply_text("❌ Помилка блокування.")
+        
+        context.user_data.clear()
+        await manage_schedule(update, context)
+
+async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показати блокування для видалення"""
+    user_id = update.message.from_user.id
+    
+    try:
+        instructor_data = get_instructor_by_telegram_id(user_id)
+        if not instructor_data:
+            await update.message.reply_text("❌ Помилка.")
+            return
+        
+        instructor_id = instructor_data[0]
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, date, time_start, time_end, reason
+                FROM schedule_blocks
+                WHERE instructor_id = ?
+                ORDER BY date, time_start
+                LIMIT 10
+            """, (instructor_id,))
+            
+            blocks = cursor.fetchall()
+        
+        if not blocks:
+            await update.message.reply_text("📋 Немає блокувань.")
+            return
+        
+        text = "🟢 *Оберіть блокування для видалення:*\n\n"
+        buttons = []
+        
+        for block_id, date, time_start, time_end, reason in blocks:
+            text += f"📅 {date} | 🕐 {time_start}-{time_end}\n"
+            if reason:
+                text += f"💬 {reason}\n"
+            text += "\n"
+            
+            buttons.append([InlineKeyboardButton(
+                f"❌ {date} {time_start}-{time_end}",
+                callback_data=f"unblock_{block_id}"
+            )])
+        
+        await update.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons),
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in show_blocks_to_unblock: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка.")
+
+async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показати всі блокування"""
+    user_id = update.message.from_user.id
+    
+    try:
+        instructor_data = get_instructor_by_telegram_id(user_id)
+        if not instructor_data:
+            await update.message.reply_text("❌ Помилка.")
+            return
+        
+        instructor_id = instructor_data[0]
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT date, time_start, time_end, reason
+                FROM schedule_blocks
+                WHERE instructor_id = ?
+                ORDER BY date, time_start
+            """, (instructor_id,))
+            
+            blocks = cursor.fetchall()
+        
+        if not blocks:
+            await update.message.reply_text("📋 У вас немає заблокованих годин.")
+            return
+        
+        text = "🔴 *Ваші блокування:*\n\n"
+        current_date = None
+        
+        for date, time_start, time_end, reason in blocks:
+            if date != current_date:
+                text += f"\n📅 *{date}*\n"
+                current_date = date
+            
+            text += f"🕐 {time_start} - {time_end}"
+            if reason:
+                text += f" | {reason}"
+            text += "\n"
+        
+        await update.message.reply_text(text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error in show_all_blocks: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка.")
+
 # ======================= ADMIN FUNCTIONS =======================
 async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Панель адміністратора"""
@@ -1539,8 +1868,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    # Callback обробники можна додати тут при потребі
-    logger.info(f"Callback received: {query.data}")
+    try:
+        if query.data.startswith("unblock_"):
+            block_id = int(query.data.split("_")[1])
+            await handle_unblock_callback(query, context, block_id)
+            
+    except Exception as e:
+        logger.error(f"Error in handle_callback: {e}", exc_info=True)
+        await query.edit_message_text("❌ Помилка.")
+
+async def handle_unblock_callback(query, context, block_id):
+    """Розблокування часу"""
+    try:
+        from database import remove_schedule_block
+        
+        if remove_schedule_block(block_id):
+            await query.edit_message_text("✅ Час розблоковано!")
+        else:
+            await query.edit_message_text("❌ Помилка розблокування.")
+            
+    except Exception as e:
+        logger.error(f"Error in handle_unblock_callback: {e}", exc_info=True)
+        await query.edit_message_text("❌ Помилка.")
 
 # ======================= REMINDERS =======================
 async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
@@ -1644,6 +1993,7 @@ def main():
         init_lessons_table()
         init_students_table()
         migrate_database()
+        init_schedule_blocks_table()
         
         # Автоматично додаємо інструкторів якщо їх немає
         ensure_instructors_exist()
