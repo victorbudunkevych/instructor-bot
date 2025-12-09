@@ -1521,9 +1521,9 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         time_start = context.user_data["block_time_start"]
         time_end = context.user_data["block_time_end"]
         
-        # Конвертуємо дату
-        date_obj = datetime.strptime(block_date, "%d.%m.%Y")
-        date_formatted = date_obj.strftime("%Y-%m-%d")
+        
+        # НЕ конвертуємо дату - в БД вона як ДД.ММ.РРРР
+        date_formatted = block_date
         
         # ПЕРЕВІРКА КОНФЛІКТІВ: чи є уроки в цей час
         def time_to_minutes(time_str):
@@ -1571,7 +1571,7 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
                     'tariff': tariff or 0
                 })
         
-        # Якщо є конфлікти - показуємо попередження і НЕ блокуємо
+        # Якщо є конфлікти - показуємо попередження
         if conflicting_lessons:
             message = f"❌ Не можна заблокувати!\n\n"
             
@@ -1596,10 +1596,13 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
             await manage_schedule(update, context)
             return
         
+        # Конвертуємо дату для schedule_blocks (там РРРР-ММ-ДД)
+        date_for_block = datetime.strptime(block_date, "%d.%m.%Y").strftime("%Y-%m-%d")
+
         
         from database import add_schedule_block
         
-        if add_schedule_block(instructor_id, date_formatted, time_start, time_end, "blocked", reason):
+        if add_schedule_block(instructor_id, date_for_block, time_start, time_end, "blocked", reason):
             await update.message.reply_text(
                 f"✅ Час заблоковано!\n\n"
                 f"📅 {block_date}\n"
