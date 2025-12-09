@@ -1,4 +1,4 @@
-# database.py - ВИПРАВЛЕНА ВЕРСІЯ (Варіант B)
+# database.py - ОНОВЛЕНА ВЕРСІЯ З НОВИМИ ФУНКЦІЯМИ
 import sqlite3
 import logging
 from contextlib import contextmanager
@@ -296,12 +296,7 @@ def get_all_instructors():
 
 # ======================= ЗАПИТИ - БЛОКУВАННЯ РОЗКЛАДУ =======================
 def add_schedule_block(instructor_id, date, time_start, time_end, block_type, reason=""):
-    """
-    Додати блокування часу
-    
-    ВИПРАВЛЕННЯ: Функція тепер НЕ перевіряє конфлікти тут,
-    перевірка виконується в bot.py перед викликом
-    """
+    """Додати блокування часу"""
     if not validate_date_format(date):
         logger.error(f"Невірний формат дати: {date}")
         return False
@@ -323,76 +318,6 @@ def add_schedule_block(instructor_id, date, time_start, time_end, block_type, re
     except Exception as e:
         logger.error(f"Помилка add_schedule_block: {e}")
         return False
-
-def check_lessons_in_timerange(instructor_id, date, time_start, time_end):
-    """
-    НОВА ФУНКЦІЯ: Перевірити чи є активні заняття в заданому часовому діапазоні
-    
-    Args:
-        instructor_id: ID інструктора
-        date: Дата у форматі "ДД.ММ.РРРР"
-        time_start: Час початку у форматі "ГГ:ХХ"
-        time_end: Час кінця у форматі "ГГ:ХХ"
-    
-    Returns:
-        List of tuples (date, time, student_name, student_phone, student_telegram_id) 
-        або [] якщо конфліктів немає
-    """
-    try:
-        def time_to_minutes(time_str):
-            """Конвертує час у хвилини від початку дня"""
-            h, m = map(int, time_str.split(':'))
-            return h * 60 + m
-        
-        block_start_min = time_to_minutes(time_start)
-        block_end_min = time_to_minutes(time_end)
-        
-        with get_db() as conn:
-            cursor = conn.cursor()
-            
-            # Отримуємо всі активні заняття інструктора на цю дату
-            cursor.execute("""
-                SELECT date, time, duration, student_name, student_phone, student_telegram_id
-                FROM lessons
-                WHERE instructor_id = ? AND date = ? AND status = 'active'
-            """, (instructor_id, date))
-            
-            lessons = cursor.fetchall()
-            
-            conflicts = []
-            
-            for lesson_date, lesson_time, duration, student_name, student_phone, student_telegram_id in lessons:
-                # Визначаємо тривалість заняття в хвилинах
-                if "1.5" in duration or "1,5" in duration:
-                    duration_min = 90
-                elif "2" in duration:
-                    duration_min = 120
-                else:
-                    duration_min = 60
-                
-                lesson_start_min = time_to_minutes(lesson_time)
-                lesson_end_min = lesson_start_min + duration_min
-                
-                # Перевіряємо чи є перетин часових діапазонів
-                # Перетин є, якщо:
-                # - початок блоку < кінця заняття  І  кінець блоку > початку заняття
-                if block_start_min < lesson_end_min and block_end_min > lesson_start_min:
-                    conflicts.append((
-                        lesson_date,
-                        lesson_time,
-                        student_name,
-                        student_phone,
-                        student_telegram_id
-                    ))
-            
-            if conflicts:
-                logger.warning(f"⚠️ Знайдено {len(conflicts)} конфліктів при блокуванні {date} {time_start}-{time_end}")
-            
-            return conflicts
-            
-    except Exception as e:
-        logger.error(f"Помилка check_lessons_in_timerange: {e}")
-        return []
 
 def remove_schedule_block(block_id):
     """Видалити блокування"""
