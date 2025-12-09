@@ -80,8 +80,6 @@ def init_lessons_table():
                     status TEXT DEFAULT 'active',
                     rating INTEGER,
                     feedback TEXT,
-                    cancelled_by TEXT,
-                    cancelled_at TIMESTAMP,
                     reminder_24h_sent INTEGER DEFAULT 0,
                     reminder_2h_sent INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -112,41 +110,6 @@ def init_lessons_table():
         logger.info("✅ Таблиця lessons готова")
     except Exception as e:
         logger.error(f"Помилка init_lessons_table: {e}")
-        raise
-
-def init_schedule_blocks_table():
-    """Створення таблиці для блокування часу інструкторами"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS schedule_blocks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    instructor_id INTEGER NOT NULL,
-                    date TEXT NOT NULL,
-                    time_start TEXT NOT NULL,
-                    time_end TEXT NOT NULL,
-                    block_type TEXT NOT NULL,
-                    reason TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (instructor_id) REFERENCES instructors(id)
-                )
-            """)
-            
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_schedule_blocks_instructor 
-                ON schedule_blocks(instructor_id)
-            """)
-            
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_schedule_blocks_date 
-                ON schedule_blocks(date)
-            """)
-            
-            conn.commit()
-        logger.info("✅ Таблиця schedule_blocks готова")
-    except Exception as e:
-        logger.error(f"Помилка init_schedule_blocks_table: {e}")
         raise
 
 def init_students_table():
@@ -195,8 +158,6 @@ def migrate_database():
                 'status': "TEXT DEFAULT 'active'",
                 'rating': 'INTEGER',
                 'feedback': 'TEXT',
-                'cancelled_by': 'TEXT',
-                'cancelled_at': 'TIMESTAMP',
                 'reminder_24h_sent': 'INTEGER DEFAULT 0',
                 'reminder_2h_sent': 'INTEGER DEFAULT 0',
                 'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
@@ -295,42 +256,6 @@ def get_all_instructors():
         return []
 
 # ======================= ЗАПИТИ - БЛОКУВАННЯ РОЗКЛАДУ =======================
-def add_schedule_block(instructor_id, date, time_start, time_end, block_type, reason=""):
-    """Додати блокування часу"""
-    if not validate_date_format(date):
-        logger.error(f"Невірний формат дати: {date}")
-        return False
-    
-    if not validate_time_format(time_start) or not validate_time_format(time_end):
-        logger.error(f"Невірний формат часу: {time_start} - {time_end}")
-        return False
-    
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO schedule_blocks 
-                (instructor_id, date, time_start, time_end, block_type, reason)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (instructor_id, date, time_start, time_end, block_type, reason))
-            conn.commit()
-            return True
-    except Exception as e:
-        logger.error(f"Помилка add_schedule_block: {e}")
-        return False
-
-def remove_schedule_block(block_id):
-    """Видалити блокування"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM schedule_blocks WHERE id = ?", (block_id,))
-            conn.commit()
-            return True
-    except Exception as e:
-        logger.error(f"Помилка remove_schedule_block: {e}")
-        return False
-
 def get_schedule_blocks(instructor_id, date):
     """Отримати всі блокування для дати"""
     try:
@@ -346,21 +271,6 @@ def get_schedule_blocks(instructor_id, date):
     except Exception as e:
         logger.error(f"Помилка get_schedule_blocks: {e}")
         return []
-
-def is_time_blocked(instructor_id, date, time_slot):
-    """Перевірити чи заблокований час"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id FROM schedule_blocks
-                WHERE instructor_id = ? AND date = ? 
-                AND time_start <= ? AND time_end > ?
-            """, (instructor_id, date, time_slot, time_slot))
-            return cursor.fetchone() is not None
-    except Exception as e:
-        logger.error(f"Помилка is_time_blocked: {e}")
-        return False
 
 # ======================= ЗАПИТИ - ЗАНЯТТЯ =======================
 def is_time_slot_available(instructor_id, date, start_time, duration):
