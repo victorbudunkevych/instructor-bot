@@ -1525,6 +1525,78 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         date_obj = datetime.strptime(block_date, "%d.%m.%Y")
         date_formatted = date_obj.strftime("%Y-%m-%d")
         
+        # ПЕРЕВІРКА КОНФЛІКТІВ: чи є уроки в цей час
+        def time_to_minutes(time_str):
+            h, m = map(int, time_str.split(':'))
+            return h * 60 + m
+        
+        block_start_min = time_to_minutes(time_start)
+        block_end_min = time_to_minutes(time_end)
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT student_name, student_phone, time, duration, student_tariff
+                FROM lessons
+                WHERE instructor_id = ? AND date = ? AND status = 'active'
+            """, (instructor_id, date_formatted))
+            
+            lessons = cursor.fetchall()
+        
+        # Перевіряємо конфлікти
+        conflicting_lessons = []
+        for student_name, student_phone, lesson_time, duration, tariff in lessons:
+            if ':' not in lesson_time:
+                continue
+            
+            lesson_start_min = time_to_minutes(lesson_time)
+            
+            # Визначаємо тривалість уроку
+            if "1.5" in duration:
+                lesson_duration = 90
+            elif "2" in duration:
+                lesson_duration = 120
+            else:
+                lesson_duration = 60
+            
+            lesson_end_min = lesson_start_min + lesson_duration
+            
+            # Перевірка на перетин
+            if not (block_end_min <= lesson_start_min or block_start_min >= lesson_end_min):
+                conflicting_lessons.append({
+                    'name': student_name,
+                    'phone': student_phone or "немає",
+                    'time': lesson_time,
+                    'duration': duration,
+                    'tariff': tariff or 0
+                })
+        
+        # Якщо є конфлікти - показуємо попередження і НЕ блокуємо
+        if conflicting_lessons:
+            message = f"❌ Не можна заблокувати!\n\n"
+            
+            for lesson in conflicting_lessons:
+                # Визначаємо час закінчення
+                start_h, start_m = map(int, lesson['time'].split(':'))
+                if "1.5" in lesson['duration']:
+                    end_h, end_m = start_h + 1, start_m + 30
+                elif "2" in lesson['duration']:
+                    end_h, end_m = start_h + 2, start_m
+                else:
+                    end_h, end_m = start_h + 1, start_m
+                
+                message += f"📅 {block_date}, 🕐 {lesson['time']}-{end_h:02d}:{end_m:02d}\n"
+                message += f"👤 {lesson['name']} ({lesson['phone']})\n"
+                message += f"💵 {lesson['tariff']} грн, {lesson['duration']}\n\n"
+            
+            message += "Зв'яжіться з учнем для перенесення."
+            
+            await update.message.reply_text(message)
+            context.user_data.clear()
+            await manage_schedule(update, context)
+            return
+        
+        
         from database import add_schedule_block
         
         if add_schedule_block(instructor_id, date_formatted, time_start, time_end, "blocked", reason):
