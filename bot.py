@@ -136,10 +136,11 @@ def get_available_time_slots(instructor_name, date_str):
         
         instructor_id = instructor_data[0]
         
-        # Перевіряємо чи це сьогодні
+        # Перевіряємо чи це сьогодні (з правильною таймзоною)
         date_obj = datetime.strptime(date_str, "%d.%m.%Y")
-        is_today = date_obj.date() == datetime.now().date()
-        current_hour = datetime.now().hour
+        now = datetime.now(TZ)
+        is_today = date_obj.date() == now.date()
+        current_hour = now.hour
         
         # Всі можливі слоти
         all_slots = []
@@ -1452,10 +1453,11 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         context.user_data["block_date"] = date_str
         context.user_data["state"] = "block_choose_time_start"
         
-        # Перевіряємо чи це сьогодні
+        # Перевіряємо чи це сьогодні (з правильною таймзоною)
         date_obj = datetime.strptime(date_str, "%d.%m.%Y")
-        is_today = date_obj.date() == datetime.now().date()
-        current_hour = datetime.now().hour
+        now = datetime.now(TZ)
+        is_today = date_obj.date() == now.date()
+        current_hour = now.hour
         
         # Показуємо години для вибору
         keyboard = []
