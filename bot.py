@@ -1903,8 +1903,120 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         instructor_id, instructor_telegram_id = instructor_data
         
+        # ========== ПЕРЕВІРКИ ПЕРЕД ЗАПИСОМ ==========
+        
+        # Розрахунок часу закінчення уроку
+        start_hour = int(time.split(':')[0])
+        if "2" in duration:
+            lesson_hours = 2
+        elif "1.5" in duration:
+            lesson_hours = 1.5
+        else:
+            lesson_hours = 1
+        
+        end_hour = start_hour + lesson_hours
+        
         with get_db() as conn:
             cursor = conn.cursor()
+            
+            # ПЕРЕВІРКА 1: Чи учень вже має урок в цей час (у будь-якого інструктора)
+            cursor.execute("""
+                SELECT i.name, l.time, l.duration
+                FROM lessons l
+                JOIN instructors i ON l.instructor_id = i.id
+                WHERE l.student_telegram_id = ? AND l.date = ? AND l.status = 'active'
+            """, (student_telegram_id, date))
+            
+            existing_lessons = cursor.fetchall()
+            
+            for existing_instructor, existing_time, existing_duration in existing_lessons:
+                existing_start = int(existing_time.split(':')[0])
+                if "2" in existing_duration:
+                    existing_hours = 2
+                elif "1.5" in existing_duration:
+                    existing_hours = 1.5
+                else:
+                    existing_hours = 1
+                existing_end = existing_start + existing_hours
+                
+                # Перевірка перетину часу
+                if not (end_hour <= existing_start or start_hour >= existing_end):
+                    await update.message.reply_text(
+                        f"❌ *Не можна записатись!*\n\n"
+                        f"У вас вже є урок в цей час:\n"
+                        f"👨‍🏫 {existing_instructor}\n"
+                        f"📅 {date}\n"
+                        f"🕐 {existing_time} ({existing_duration})\n\n"
+                        f"Оберіть інший час.",
+                        parse_mode="Markdown"
+                    )
+                    return
+            
+            # ПЕРЕВІРКА 2: Чи не перевищує ліміт 2 години в день
+            cursor.execute("""
+                SELECT SUM(
+                    CASE 
+                        WHEN duration LIKE '%2%' THEN 2
+                        WHEN duration LIKE '%1.5%' THEN 1.5
+                        ELSE 1
+                    END
+                )
+                FROM lessons
+                WHERE student_telegram_id = ? AND date = ? AND status = 'active'
+            """, (student_telegram_id, date))
+            
+            total_hours_today = cursor.fetchone()[0] or 0
+            
+            if total_hours_today + lesson_hours > 2:
+                await update.message.reply_text(
+                    f"❌ *Ліміт перевищено!*\n\n"
+                    f"Ви вже маєте *{total_hours_today:.1f} год* на {date}\n"
+                    f"Максимум: *2 години на день*\n\n"
+                    f"Залишилось: *{2 - total_hours_today:.1f} год*",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # ПЕРЕВІРКА 3: Чи не перевищує ліміт 6 годин в тиждень
+            # Визначаємо початок і кінець тижня
+            from datetime import datetime, timedelta
+            date_obj = datetime.strptime(date, "%d.%m.%Y")
+            # Понеділок поточного тижня
+            week_start = date_obj - timedelta(days=date_obj.weekday())
+            # Неділя поточного тижня
+            week_end = week_start + timedelta(days=6)
+            
+            week_start_str = week_start.strftime("%d.%m.%Y")
+            week_end_str = week_end.strftime("%d.%m.%Y")
+            
+            cursor.execute("""
+                SELECT SUM(
+                    CASE 
+                        WHEN duration LIKE '%2%' THEN 2
+                        WHEN duration LIKE '%1.5%' THEN 1.5
+                        ELSE 1
+                    END
+                )
+                FROM lessons
+                WHERE student_telegram_id = ? 
+                AND date BETWEEN ? AND ?
+                AND status = 'active'
+            """, (student_telegram_id, week_start_str, week_end_str))
+            
+            total_hours_week = cursor.fetchone()[0] or 0
+            
+            if total_hours_week + lesson_hours > 6:
+                await update.message.reply_text(
+                    f"❌ *Ліміт перевищено!*\n\n"
+                    f"Ви вже маєте *{total_hours_week:.1f} год* цього тижня\n"
+                    f"Максимум: *6 годин на тиждень*\n\n"
+                    f"Залишилось: *{6 - total_hours_week:.1f} год*",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # ========== ВСІ ПЕРЕВІРКИ ПРОЙШЛИ - ЗБЕРІГАЄМО ==========
+            
             cursor.execute("""
                 INSERT INTO lessons 
                 (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, status)
