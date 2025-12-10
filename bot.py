@@ -193,6 +193,13 @@ def get_available_time_slots(instructor_name, date_str):
             and not is_time_blocked(instructor_id, date_formatted, slot)
         ]
         
+        # Якщо сьогодні - додаткова фільтрація (мінімум +1 година)
+        if is_today:
+            free_slots = [
+                slot for slot in free_slots
+                if int(slot.split(':')[0]) >= current_hour + 1
+            ]
+        
         return free_slots
         
     except Exception as e:
@@ -1849,7 +1856,7 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT l.date, l.time, l.duration, i.name, l.status
+                SELECT l.date, l.time, l.duration, i.name, i.phone, l.status
                 FROM lessons l
                 JOIN instructors i ON l.instructor_id = i.id
                 WHERE l.student_telegram_id = ? AND l.status = 'active'
@@ -1865,9 +1872,9 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
         
         text = "📖 *Ваші записи:*\n\n"
         
-        for date, time, duration, instructor_name, status in lessons:
-            text += f"📅 {date} | 🕐 {time} ({duration})\n"
-            text += f"👨‍🏫 {instructor_name}\n\n"
+        for date, time, duration, instructor_name, instructor_phone, status in lessons:
+            text += f"📅 {date} о {time} ({duration})\n"
+            text += f"👨‍🏫 {instructor_name} | 📱 {instructor_phone}\n\n"
         
         await update.message.reply_text(text, parse_mode="Markdown")
         
