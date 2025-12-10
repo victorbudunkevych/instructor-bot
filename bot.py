@@ -145,7 +145,7 @@ def get_available_time_slots(instructor_name, date_str):
         all_slots = []
         start_hour = WORK_HOURS_START
         
-        # Якщо це сьогодні - починаємо з наступної години
+        # Якщо це сьогодні - починаємо мінімум через 1 годину
         if is_today:
             start_hour = max(current_hour + 1, WORK_HOURS_START)
         
@@ -1445,9 +1445,17 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         context.user_data["block_date"] = date_str
         context.user_data["state"] = "block_choose_time_start"
         
-        # Показуємо години для вибору (8:00 - 18:00)
+        # Перевіряємо чи це сьогодні
+        date_obj = datetime.strptime(date_str, "%d.%m.%Y")
+        is_today = date_obj.date() == datetime.now().date()
+        current_hour = datetime.now().hour
+        
+        # Показуємо години для вибору
         keyboard = []
         for hour in range(WORK_HOURS_START, WORK_HOURS_END):
+            # Якщо сьогодні - пропускаємо минулі години
+            if is_today and hour <= current_hour:
+                continue
             keyboard.append([KeyboardButton(f"{hour:02d}:00")])
         
         keyboard.append([KeyboardButton("🔙 Назад")])
