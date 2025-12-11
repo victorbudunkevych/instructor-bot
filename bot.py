@@ -2241,9 +2241,6 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
     try:
         now = datetime.now(TZ)
         
-        # Нагадування за 24 години
-        tomorrow = now + timedelta(hours=24)
-        
         with get_db() as conn:
             cursor = conn.cursor()
             
@@ -2344,16 +2341,40 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
         
         with get_db() as conn:
             cursor = conn.cursor()
+            
+            # Отримуємо всі активні уроки
             cursor.execute("""
-                UPDATE lessons
-                SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+                SELECT id, date, time
+                FROM lessons
                 WHERE status = 'active'
-                AND datetime(date || ' ' || time) < ?
-            """, (now.strftime("%Y-%m-%d %H:%M"),))
+            """)
+            
+            lessons_to_complete = []
+            
+            for lesson_id, date_str, time_str in cursor.fetchall():
+                try:
+                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
+                    lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+                    lesson_datetime = TZ.localize(lesson_datetime)
+                    
+                    # Якщо урок вже минув
+                    if lesson_datetime < now:
+                        lessons_to_complete.append(lesson_id)
+                except Exception as e:
+                    logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
+            
+            # Оновлюємо статус
+            for lesson_id in lessons_to_complete:
+                cursor.execute("""
+                    UPDATE lessons
+                    SET status = 'completed', completed_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (lesson_id,))
             
             conn.commit()
             
-        logger.info("Completed lessons checked")
+            if lessons_to_complete:
+                logger.info(f"Completed {len(lessons_to_complete)} lessons")
         
     except Exception as e:
         logger.error(f"Error in check_completed_lessons: {e}", exc_info=True)
