@@ -291,7 +291,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 keyboard = [
                     [KeyboardButton("🚀 Записатися на заняття")],
-                    [KeyboardButton("📋 Мої записи")]
+                    [KeyboardButton("📋 Мої записи")],
+                    [KeyboardButton("📊 Моя статистика")]
                 ]
                 
                 await update.message.reply_text(
@@ -523,6 +524,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if text == "📖 Мої записи" or text == "📋 Мої записи":
             await show_student_lessons(update, context)
+            return
+        
+        if text == "📊 Моя статистика":
+            await show_student_statistics(update, context)
             return
         
         # === ПІДТВЕРДЖЕННЯ ===
@@ -1884,6 +1889,136 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Error in show_student_lessons: {e}", exc_info=True)
         await update.message.reply_text("❌ Помилка завантаження записів.")
 
+async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показати статистику учня"""
+    user_id = update.message.from_user.id
+    
+    try:
+        from datetime import datetime, timedelta
+        
+        now = datetime.now(TZ)
+        today_str = now.strftime("%d.%m.%Y")
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # ========== ЗАПЛАНОВАНО ==========
+            cursor.execute("""
+                SELECT COUNT(*), 
+                       SUM(CASE 
+                           WHEN duration LIKE '%2%' THEN 2
+                           WHEN duration LIKE '%1.5%' THEN 1.5
+                           ELSE 1
+                       END),
+                       SUM(CASE 
+                           WHEN duration LIKE '%2%' THEN student_tariff * 2
+                           ELSE student_tariff
+                       END)
+                FROM lessons
+                WHERE student_telegram_id = ? 
+                AND status = 'active'
+                AND date >= ?
+            """, (user_id, today_str))
+            
+            planned = cursor.fetchone()
+            planned_count = planned[0] or 0
+            planned_hours = planned[1] or 0
+            planned_cost = planned[2] or 0
+            
+            # ========== ЗАВЕРШЕНО ==========
+            cursor.execute("""
+                SELECT COUNT(*), 
+                       SUM(CASE 
+                           WHEN duration LIKE '%2%' THEN 2
+                           WHEN duration LIKE '%1.5%' THEN 1.5
+                           ELSE 1
+                       END),
+                       SUM(CASE 
+                           WHEN duration LIKE '%2%' THEN student_tariff * 2
+                           ELSE student_tariff
+                       END)
+                FROM lessons
+                WHERE student_telegram_id = ? 
+                AND status = 'completed'
+            """, (user_id,))
+            
+            completed = cursor.fetchone()
+            completed_count = completed[0] or 0
+            completed_hours = completed[1] or 0
+            completed_cost = completed[2] or 0
+            
+            # ========== ПРОГРЕС ==========
+            cursor.execute("""
+                SELECT MIN(date)
+                FROM lessons
+                WHERE student_telegram_id = ?
+                AND status = 'completed'
+            """, (user_id,))
+            
+            first_lesson = cursor.fetchone()[0]
+            
+            if first_lesson:
+                first_date = datetime.strptime(first_lesson, "%d.%m.%Y")
+                days_learning = (now - first_date).days
+                weeks_learning = days_learning / 7
+                avg_hours_per_week = completed_hours / weeks_learning if weeks_learning > 0 else 0
+            else:
+                days_learning = 0
+                avg_hours_per_week = 0
+            
+            # ========== ІНСТРУКТОРИ ==========
+            cursor.execute("""
+                SELECT i.name, COUNT(*)
+                FROM lessons l
+                JOIN instructors i ON l.instructor_id = i.id
+                WHERE l.student_telegram_id = ?
+                AND l.status = 'completed'
+                GROUP BY i.name
+                ORDER BY COUNT(*) DESC
+            """, (user_id,))
+            
+            instructors = cursor.fetchall()
+        
+        # ========== ФОРМУВАННЯ ПОВІДОМЛЕННЯ ==========
+        text = "📊 *Статистика*\n\n"
+        
+        # Заплановано
+        text += "▶️ *ЗАПЛАНОВАНО*\n"
+        if planned_count > 0:
+            text += f"   {planned_count} {'урок' if planned_count == 1 else 'уроки' if planned_count < 5 else 'уроків'} "
+            text += f"({planned_hours:.1f} год) → {planned_cost:,.0f} грн\n\n"
+        else:
+            text += "   Немає запланованих уроків\n\n"
+        
+        # Завершено
+        text += "✅ *ЗАВЕРШЕНО*\n"
+        if completed_count > 0:
+            text += f"   {completed_count} {'урок' if completed_count == 1 else 'уроки' if completed_count < 5 else 'уроків'} "
+            text += f"({completed_hours:.1f} год) → {completed_cost:,.0f} грн\n\n"
+        else:
+            text += "   Поки немає завершених уроків\n\n"
+        
+        # Прогрес
+        if days_learning > 0:
+            text += "📈 *ПРОГРЕС*\n"
+            text += f"   {days_learning} {'день' if days_learning == 1 else 'дні' if days_learning < 5 else 'днів'} | "
+            text += f"{avg_hours_per_week:.1f} год/тиждень\n\n"
+        
+        # Інструктори
+        if instructors:
+            text += "👨‍🏫 *ІНСТРУКТОРИ*\n"
+            instructor_names = []
+            for name, count in instructors:
+                short_name = name.split()[0]  # Тільки ім'я
+                instructor_names.append(f"{short_name}: {count}")
+            text += f"   {' | '.join(instructor_names)}\n"
+        
+        await update.message.reply_text(text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error in show_student_statistics: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка завантаження статистики.")
+
 async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Зберегти заняття в БД"""
     try:
@@ -2108,17 +2243,32 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             cursor = conn.cursor()
             
             # === НАГАДУВАННЯ ЗА 24 ГОДИНИ ===
+            # Отримуємо всі активні уроки
             cursor.execute("""
                 SELECT l.id, l.student_telegram_id, i.name, l.date, l.time
                 FROM lessons l
                 JOIN instructors i ON l.instructor_id = i.id
                 WHERE l.status = 'active' 
                 AND l.reminder_24h_sent = 0
-                AND datetime(l.date || ' ' || l.time) <= ?
-                AND datetime(l.date || ' ' || l.time) > ?
-            """, (tomorrow.strftime("%Y-%m-%d %H:%M"), now.strftime("%Y-%m-%d %H:%M")))
+            """)
             
-            lessons_24h = cursor.fetchall()
+            all_lessons = cursor.fetchall()
+            lessons_24h = []
+            
+            # Перевіряємо кожен урок
+            for lesson_id, student_id, instructor, date_str, time_str in all_lessons:
+                try:
+                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
+                    lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+                    lesson_datetime = TZ.localize(lesson_datetime)
+                    
+                    # Перевіряємо чи урок через 24 години (±30 хвилин)
+                    time_diff = (lesson_datetime - now).total_seconds() / 3600
+                    
+                    if 23.5 <= time_diff <= 24.5:
+                        lessons_24h.append((lesson_id, student_id, instructor, date_str, time_str))
+                except Exception as e:
+                    logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
             
             for lesson_id, student_id, instructor, date, time in lessons_24h:
                 try:
@@ -2135,19 +2285,32 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     logger.error(f"Failed to send 24h reminder: {e}")
             
             # === НАГАДУВАННЯ ЗА 2 ГОДИНИ ===
-            in_2_hours = now + timedelta(hours=2)
-            
+            # Отримуємо всі активні уроки
             cursor.execute("""
                 SELECT l.id, l.student_telegram_id, i.name, l.date, l.time
                 FROM lessons l
                 JOIN instructors i ON l.instructor_id = i.id
                 WHERE l.status = 'active' 
                 AND l.reminder_2h_sent = 0
-                AND datetime(l.date || ' ' || l.time) <= ?
-                AND datetime(l.date || ' ' || l.time) > ?
-            """, (in_2_hours.strftime("%Y-%m-%d %H:%M"), now.strftime("%Y-%m-%d %H:%M")))
+            """)
             
-            lessons_2h = cursor.fetchall()
+            all_lessons_2h = cursor.fetchall()
+            lessons_2h = []
+            
+            # Перевіряємо кожен урок
+            for lesson_id, student_id, instructor, date_str, time_str in all_lessons_2h:
+                try:
+                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
+                    lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+                    lesson_datetime = TZ.localize(lesson_datetime)
+                    
+                    # Перевіряємо чи урок через 2 години (±30 хвилин)
+                    time_diff = (lesson_datetime - now).total_seconds() / 3600
+                    
+                    if 1.5 <= time_diff <= 2.5:
+                        lessons_2h.append((lesson_id, student_id, instructor, date_str, time_str))
+                except Exception as e:
+                    logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
             
             for lesson_id, student_id, instructor, date, time in lessons_2h:
                 try:
