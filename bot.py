@@ -478,7 +478,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await manage_schedule(update, context)
             return
         elif text == "📊 Моя статистика":
-            await show_instructor_stats_menu(update, context)
+            # Перевіряємо чи це інструктор
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (user_id,))
+                is_instructor = cursor.fetchone() is not None
+            
+            if is_instructor:
+                await show_instructor_stats_menu(update, context)
+            else:
+                await show_student_statistics(update, context)
             return
         elif text == "❌ Історія скасувань":
             await show_cancellation_history(update, context)
@@ -524,10 +533,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if text == "📖 Мої записи" or text == "📋 Мої записи":
             await show_student_lessons(update, context)
-            return
-        
-        if text == "📊 Моя статистика":
-            await show_student_statistics(update, context)
             return
         
         # === ПІДТВЕРДЖЕННЯ ===
@@ -1980,10 +1985,10 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             instructors = cursor.fetchall()
         
         # ========== ФОРМУВАННЯ ПОВІДОМЛЕННЯ ==========
-        text = "📊 *Статистика*\n\n"
+        text = "📊 Статистика\n\n"
         
         # Заплановано
-        text += "▶️ *ЗАПЛАНОВАНО*\n"
+        text += "▶️ ЗАПЛАНОВАНО\n"
         if planned_count > 0:
             text += f"   {planned_count} {'урок' if planned_count == 1 else 'уроки' if planned_count < 5 else 'уроків'} "
             text += f"({planned_hours:.1f} год) → {planned_cost:,.0f} грн\n\n"
@@ -1991,7 +1996,7 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             text += "   Немає запланованих уроків\n\n"
         
         # Завершено
-        text += "✅ *ЗАВЕРШЕНО*\n"
+        text += "✅ ЗАВЕРШЕНО\n"
         if completed_count > 0:
             text += f"   {completed_count} {'урок' if completed_count == 1 else 'уроки' if completed_count < 5 else 'уроків'} "
             text += f"({completed_hours:.1f} год) → {completed_cost:,.0f} грн\n\n"
@@ -2000,20 +2005,20 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
         
         # Прогрес
         if days_learning > 0:
-            text += "📈 *ПРОГРЕС*\n"
+            text += "📈 ПРОГРЕС\n"
             text += f"   {days_learning} {'день' if days_learning == 1 else 'дні' if days_learning < 5 else 'днів'} | "
             text += f"{avg_hours_per_week:.1f} год/тиждень\n\n"
         
         # Інструктори
         if instructors:
-            text += "👨‍🏫 *ІНСТРУКТОРИ*\n"
+            text += "👨‍🏫 ІНСТРУКТОРИ\n"
             instructor_names = []
             for name, count in instructors:
                 short_name = name.split()[0]  # Тільки ім'я
                 instructor_names.append(f"{short_name}: {count}")
             text += f"   {' | '.join(instructor_names)}\n"
         
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text)
         
     except Exception as e:
         logger.error(f"Error in show_student_statistics: {e}", exc_info=True)
