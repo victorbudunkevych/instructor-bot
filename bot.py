@@ -2240,6 +2240,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
     """Відправка нагадувань про заняття"""
     try:
         now = datetime.now(TZ)
+        logger.info(f"🔔 send_reminders запущено! Зараз: {now.strftime('%d.%m.%Y %H:%M')}")
         
         with get_db() as conn:
             cursor = conn.cursor()
@@ -2255,6 +2256,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             """)
             
             all_lessons = cursor.fetchall()
+            logger.info(f"📋 Знайдено {len(all_lessons)} активних уроків (без нагадування 24h)")
             lessons_24h = []
             
             # Перевіряємо кожен урок
@@ -2267,8 +2269,11 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     # Перевіряємо чи урок через 24 години (±30 хвилин)
                     time_diff = (lesson_datetime - now).total_seconds() / 3600
                     
+                    logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
+                    
                     if 23.5 <= time_diff <= 24.5:
                         lessons_24h.append((lesson_id, student_id, instructor, date_str, time_str))
+                        logger.info(f"    ✅ Додано до нагадувань 24h!")
                 except Exception as e:
                     logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
             
@@ -2297,6 +2302,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             """)
             
             all_lessons_2h = cursor.fetchall()
+            logger.info(f"📋 Знайдено {len(all_lessons_2h)} активних уроків (без нагадування 2h)")
             lessons_2h = []
             
             # Перевіряємо кожен урок
@@ -2309,13 +2315,17 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     # Перевіряємо чи урок через 2 години (±30 хвилин)
                     time_diff = (lesson_datetime - now).total_seconds() / 3600
                     
+                    logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
+                    
                     if 1.5 <= time_diff <= 2.5:
                         lessons_2h.append((lesson_id, student_id, instructor, date_str, time_str))
+                        logger.info(f"    ✅ Додано до нагадувань 2h!")
                 except Exception as e:
                     logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
             
             for lesson_id, student_id, instructor, date, time in lessons_2h:
                 try:
+                    logger.info(f"📤 Відправляю нагадування 2h учню {student_id}: {date} {time}")
                     await context.bot.send_message(
                         chat_id=student_id,
                         text=f"🔔 *Нагадування!*\n\nУ вас заняття через 2 години:\n"
@@ -2326,10 +2336,11 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     
                     cursor.execute("UPDATE lessons SET reminder_2h_sent = 1 WHERE id = ?", (lesson_id,))
                     conn.commit()
+                    logger.info(f"✅ Нагадування 2h відправлено успішно!")
                 except Exception as e:
                     logger.error(f"Failed to send 2h reminder: {e}")
         
-        logger.info("Reminders sent successfully")
+        logger.info("✅ Reminders sent successfully")
         
     except Exception as e:
         logger.error(f"Error in send_reminders: {e}", exc_info=True)
