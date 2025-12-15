@@ -1882,13 +1882,13 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("📋 У вас поки немає записів на заняття.")
             return
         
-        text = "📖 *Ваші записи:*\n\n"
+        text = "📖 Ваші записи:\n\n"
         
         for date, time, duration, instructor_name, instructor_phone, status in lessons:
             text += f"📅 {date} о {time} ({duration})\n"
             text += f"👨‍🏫 {instructor_name} | 📱 {instructor_phone}\n\n"
         
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text)
         
     except Exception as e:
         logger.error(f"Error in show_student_lessons: {e}", exc_info=True)
@@ -2271,7 +2271,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     
                     logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
                     
-                    if 23.0 <= time_diff <= 25.0:
+                    if 23.5 <= time_diff <= 24.5:
                         lessons_24h.append((lesson_id, student_id, instructor, date_str, time_str))
                         logger.info(f"    ✅ Додано до нагадувань 24h!")
                 except Exception as e:
@@ -2317,7 +2317,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     
                     logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
                     
-                    if 1.0 <= time_diff <= 3.0:
+                    if 1.5 <= time_diff <= 2.5:
                         lessons_2h.append((lesson_id, student_id, instructor, date_str, time_str))
                         logger.info(f"    ✅ Додано до нагадувань 2h!")
                 except Exception as e:
