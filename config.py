@@ -18,4 +18,4 @@ STUDENT_TARIFFS = {
 }
 
 # ID адміністратора (ваш Telegram ID)
-ADMIN_ID = 123456789  # Замініть на ваш Telegram ID
+ADMIN_ID = 669706811  # Замініть на ваш Telegram ID
