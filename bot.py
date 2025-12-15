@@ -478,16 +478,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await manage_schedule(update, context)
             return
         elif text == "📊 Моя статистика":
-            # Перевіряємо чи це інструктор
-            with get_db() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (user_id,))
-                is_instructor = cursor.fetchone() is not None
-            
-            if is_instructor:
-                await show_instructor_stats_menu(update, context)
-            else:
-                await show_student_statistics(update, context)
+            await show_instructor_stats_menu(update, context)
             return
         elif text == "❌ Історія скасувань":
             await show_cancellation_history(update, context)
@@ -533,6 +524,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if text == "📖 Мої записи" or text == "📋 Мої записи":
             await show_student_lessons(update, context)
+            return
+        
+        if text == "📊 Моя статистика":
+            await show_student_statistics(update, context)
             return
         
         # === ПІДТВЕРДЖЕННЯ ===
@@ -1985,10 +1980,10 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             instructors = cursor.fetchall()
         
         # ========== ФОРМУВАННЯ ПОВІДОМЛЕННЯ ==========
-        text = "📊 Статистика\n\n"
+        text = "📊 *Статистика*\n\n"
         
         # Заплановано
-        text += "▶️ ЗАПЛАНОВАНО\n"
+        text += "▶️ *ЗАПЛАНОВАНО*\n"
         if planned_count > 0:
             text += f"   {planned_count} {'урок' if planned_count == 1 else 'уроки' if planned_count < 5 else 'уроків'} "
             text += f"({planned_hours:.1f} год) → {planned_cost:,.0f} грн\n\n"
@@ -1996,7 +1991,7 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             text += "   Немає запланованих уроків\n\n"
         
         # Завершено
-        text += "✅ ЗАВЕРШЕНО\n"
+        text += "✅ *ЗАВЕРШЕНО*\n"
         if completed_count > 0:
             text += f"   {completed_count} {'урок' if completed_count == 1 else 'уроки' if completed_count < 5 else 'уроків'} "
             text += f"({completed_hours:.1f} год) → {completed_cost:,.0f} грн\n\n"
@@ -2005,20 +2000,20 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
         
         # Прогрес
         if days_learning > 0:
-            text += "📈 ПРОГРЕС\n"
+            text += "📈 *ПРОГРЕС*\n"
             text += f"   {days_learning} {'день' if days_learning == 1 else 'дні' if days_learning < 5 else 'днів'} | "
             text += f"{avg_hours_per_week:.1f} год/тиждень\n\n"
         
         # Інструктори
         if instructors:
-            text += "👨‍🏫 ІНСТРУКТОРИ\n"
+            text += "👨‍🏫 *ІНСТРУКТОРИ*\n"
             instructor_names = []
             for name, count in instructors:
                 short_name = name.split()[0]  # Тільки ім'я
                 instructor_names.append(f"{short_name}: {count}")
             text += f"   {' | '.join(instructor_names)}\n"
         
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error in show_student_statistics: {e}", exc_info=True)
@@ -2246,7 +2241,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             cursor = conn.cursor()
             
             # === НАГАДУВАННЯ ЗА 24 ГОДИНИ ===
-            # Отримуємо всі активні уроки
+            # Отримуємо всі активні уроки без нагадування 24h
             cursor.execute("""
                 SELECT l.id, l.student_telegram_id, i.name, l.date, l.time
                 FROM lessons l
@@ -2257,28 +2252,26 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             
             all_lessons = cursor.fetchall()
             logger.info(f"📋 Знайдено {len(all_lessons)} активних уроків (без нагадування 24h)")
-            lessons_24h = []
             
-            # Перевіряємо кожен урок
+            lessons_to_remind_24h = []
             for lesson_id, student_id, instructor, date_str, time_str in all_lessons:
-                try:
-                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
-                    lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-                    lesson_datetime = TZ.localize(lesson_datetime)
-                    
-                    # Перевіряємо чи урок через 24 години (±30 хвилин)
-                    time_diff = (lesson_datetime - now).total_seconds() / 3600
-                    
-                    logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
-                    
-                    if 23.5 <= time_diff <= 24.5:
-                        lessons_24h.append((lesson_id, student_id, instructor, date_str, time_str))
-                        logger.info(f"    ✅ Додано до нагадувань 24h!")
-                except Exception as e:
-                    logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
+                # Конвертуємо дату/час уроку в datetime
+                lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+                lesson_datetime = TZ.localize(lesson_datetime)
+                
+                # Різниця в годинах
+                time_diff = (lesson_datetime - now).total_seconds() / 3600
+                logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
+                
+                # Перевіряємо чи урок через 23-25 годин (±1 год від 24h)
+                if 23.0 <= time_diff <= 25.0:
+                    lessons_to_remind_24h.append((lesson_id, student_id, instructor, date_str, time_str))
+                    logger.info(f"    ✅ Додано до нагадувань 24h!")
             
-            for lesson_id, student_id, instructor, date, time in lessons_24h:
+            # Відправляємо нагадування 24h
+            for lesson_id, student_id, instructor, date, time in lessons_to_remind_24h:
                 try:
+                    logger.info(f"📤 Відправляю нагадування 24h учню {student_id}: {date} {time}")
                     await context.bot.send_message(
                         chat_id=student_id,
                         text=f"⏰ *Нагадування!*\n\nУ вас заняття завтра:\n"
@@ -2288,11 +2281,12 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     
                     cursor.execute("UPDATE lessons SET reminder_24h_sent = 1 WHERE id = ?", (lesson_id,))
                     conn.commit()
+                    logger.info(f"✅ Нагадування 24h відправлено успішно!")
                 except Exception as e:
-                    logger.error(f"Failed to send 24h reminder: {e}")
+                    logger.error(f"❌ Помилка відправки нагадування 24h: {e}")
             
             # === НАГАДУВАННЯ ЗА 2 ГОДИНИ ===
-            # Отримуємо всі активні уроки
+            # Отримуємо всі активні уроки без нагадування 2h
             cursor.execute("""
                 SELECT l.id, l.student_telegram_id, i.name, l.date, l.time
                 FROM lessons l
@@ -2303,27 +2297,24 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             
             all_lessons_2h = cursor.fetchall()
             logger.info(f"📋 Знайдено {len(all_lessons_2h)} активних уроків (без нагадування 2h)")
-            lessons_2h = []
             
-            # Перевіряємо кожен урок
+            lessons_to_remind_2h = []
             for lesson_id, student_id, instructor, date_str, time_str in all_lessons_2h:
-                try:
-                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
-                    lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-                    lesson_datetime = TZ.localize(lesson_datetime)
-                    
-                    # Перевіряємо чи урок через 2 години (±30 хвилин)
-                    time_diff = (lesson_datetime - now).total_seconds() / 3600
-                    
-                    logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
-                    
-                    if 1.5 <= time_diff <= 2.5:
-                        lessons_2h.append((lesson_id, student_id, instructor, date_str, time_str))
-                        logger.info(f"    ✅ Додано до нагадувань 2h!")
-                except Exception as e:
-                    logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
+                # Конвертуємо дату/час уроку в datetime
+                lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
+                lesson_datetime = TZ.localize(lesson_datetime)
+                
+                # Різниця в годинах
+                time_diff = (lesson_datetime - now).total_seconds() / 3600
+                logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
+                
+                # Перевіряємо чи урок через 1-3 години (±1 год від 2h)
+                if 1.0 <= time_diff <= 3.0:
+                    lessons_to_remind_2h.append((lesson_id, student_id, instructor, date_str, time_str))
+                    logger.info(f"    ✅ Додано до нагадувань 2h!")
             
-            for lesson_id, student_id, instructor, date, time in lessons_2h:
+            # Відправляємо нагадування 2h
+            for lesson_id, student_id, instructor, date, time in lessons_to_remind_2h:
                 try:
                     logger.info(f"📤 Відправляю нагадування 2h учню {student_id}: {date} {time}")
                     await context.bot.send_message(
@@ -2338,7 +2329,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     conn.commit()
                     logger.info(f"✅ Нагадування 2h відправлено успішно!")
                 except Exception as e:
-                    logger.error(f"Failed to send 2h reminder: {e}")
+                    logger.error(f"❌ Помилка відправки нагадування 2h: {e}")
         
         logger.info("✅ Reminders sent successfully")
         
@@ -2352,40 +2343,16 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
         
         with get_db() as conn:
             cursor = conn.cursor()
-            
-            # Отримуємо всі активні уроки
             cursor.execute("""
-                SELECT id, date, time
-                FROM lessons
+                UPDATE lessons
+                SET status = 'completed', completed_at = CURRENT_TIMESTAMP
                 WHERE status = 'active'
-            """)
-            
-            lessons_to_complete = []
-            
-            for lesson_id, date_str, time_str in cursor.fetchall():
-                try:
-                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
-                    lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
-                    lesson_datetime = TZ.localize(lesson_datetime)
-                    
-                    # Якщо урок вже минув
-                    if lesson_datetime < now:
-                        lessons_to_complete.append(lesson_id)
-                except Exception as e:
-                    logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
-            
-            # Оновлюємо статус
-            for lesson_id in lessons_to_complete:
-                cursor.execute("""
-                    UPDATE lessons
-                    SET status = 'completed', completed_at = CURRENT_TIMESTAMP
-                    WHERE id = ?
-                """, (lesson_id,))
+                AND datetime(date || ' ' || time) < ?
+            """, (now.strftime("%Y-%m-%d %H:%M"),))
             
             conn.commit()
             
-            if lessons_to_complete:
-                logger.info(f"Completed {len(lessons_to_complete)} lessons")
+        logger.info("Completed lessons checked")
         
     except Exception as e:
         logger.error(f"Error in check_completed_lessons: {e}", exc_info=True)
