@@ -1012,9 +1012,8 @@ async def show_instructor_stats_menu(update: Update, context: ContextTypes.DEFAU
     ]
     
     await update.message.reply_text(
-        "📊 *Статистика*\n\nОберіть період:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode="Markdown"
+        "📊 Статистика\n\nОберіть період:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
     
     context.user_data["state"] = "stats_period"
@@ -1053,9 +1052,8 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["state"] = "stats_custom_period"
         await update.message.reply_text(
             "📅 Введіть період у форматі:\n"
-            "*ДД.ММ.РРРР - ДД.ММ.РРРР*\n\n"
-            "Наприклад: 01.11.2024 - 30.11.2024",
-            parse_mode="Markdown"
+            "ДД.ММ.РРРР - ДД.ММ.РРРР\n\n"
+            "Наприклад: 01.11.2024 - 30.11.2024"
         )
         return
     else:
@@ -1073,15 +1071,17 @@ async def show_instructor_stats(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text("❌ Помилка отримання статистики.")
             return
         
-        text = f"📊 *Статистика {period_text}*\n\n"
+        text = f"📊 Статистика {period_text}\n\n"
         text += f"📝 Занять проведено: {stats['total_lessons']}\n"
         text += f"⏱ Годин відпрацьовано: {stats['total_hours']}\n"
         text += f"💰 Заробіток: {stats['earnings']:.0f} грн\n"
         text += f"⭐ Середній рейтинг: {stats['avg_rating']}\n"
         text += f"❌ Скасовано: {stats['cancelled']}\n"
         
-        await update.message.reply_text(text, parse_mode="Markdown")
-        await start(update, context)
+        await update.message.reply_text(text)
+        
+        # Повертаємось в меню статистики
+        await show_instructor_stats_menu(update, context)
         
     except Exception as e:
         logger.error(f"Error in show_instructor_stats: {e}", exc_info=True)
