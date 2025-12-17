@@ -1012,8 +1012,9 @@ async def show_instructor_stats_menu(update: Update, context: ContextTypes.DEFAU
     ]
     
     await update.message.reply_text(
-        "📊 Статистика\n\nОберіть період:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        "📊 *Статистика*\n\nОберіть період:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
     )
     
     context.user_data["state"] = "stats_period"
@@ -1052,8 +1053,9 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.user_data["state"] = "stats_custom_period"
         await update.message.reply_text(
             "📅 Введіть період у форматі:\n"
-            "ДД.ММ.РРРР - ДД.ММ.РРРР\n\n"
-            "Наприклад: 01.11.2024 - 30.11.2024"
+            "*ДД.ММ.РРРР - ДД.ММ.РРРР*\n\n"
+            "Наприклад: 01.11.2024 - 30.11.2024",
+            parse_mode="Markdown"
         )
         return
     else:
@@ -1071,14 +1073,14 @@ async def show_instructor_stats(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text("❌ Помилка отримання статистики.")
             return
         
-        text = f"📊 Статистика {period_text}\n\n"
+        text = f"📊 *Статистика {period_text}*\n\n"
         text += f"📝 Занять проведено: {stats['total_lessons']}\n"
         text += f"⏱ Годин відпрацьовано: {stats['total_hours']}\n"
         text += f"💰 Заробіток: {stats['earnings']:.0f} грн\n"
         text += f"⭐ Середній рейтинг: {stats['avg_rating']}\n"
         text += f"❌ Скасовано: {stats['cancelled']}\n"
         
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, parse_mode="Markdown")
         await start(update, context)
         
     except Exception as e:
@@ -1113,7 +1115,7 @@ async def show_cancellation_history(update: Update, context: ContextTypes.DEFAUL
             await update.message.reply_text("📋 Немає скасованих занять.")
             return
         
-        text = "❌ Історія скасувань:\n\n"
+        text = "❌ *Історія скасувань:*\n\n"
         
         for date, time, student_name, cancelled_by, cancelled_at in cancellations:
             text += f"📅 {date} {time}\n"
@@ -1123,7 +1125,7 @@ async def show_cancellation_history(update: Update, context: ContextTypes.DEFAUL
                 text += f"🕐 {cancelled_at[:16]}\n"
             text += "\n"
         
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error in show_cancellation_history: {e}", exc_info=True)
@@ -1747,9 +1749,8 @@ async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     
     await update.message.reply_text(
-        "🔐 *Панель адміністратора*\n\nОберіть дію:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode="Markdown"
+        "🔐 Панель адміністратора\n\nОберіть дію:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
     
     context.user_data["state"] = "admin_panel"
@@ -1781,12 +1782,13 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "👥 Список інструкторів":
         instructors = get_all_instructors()
         
-        text = "👥 *Список інструкторів:*\n\n"
+        text = "👥 Список інструкторів:\n\n"
         for i, (inst_id, name, transmission, telegram_id) in enumerate(instructors, 1):
             text += f"{i}. {name} ({transmission})\n"
             text += f"   ID: {telegram_id}\n\n"
         
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text)
+        await show_admin_panel(update, context)
         return
     
     # Обробка періоду
@@ -1803,9 +1805,8 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     elif text == "📊 Свій період":
         await update.message.reply_text(
             "📅 Введіть період у форматі:\n"
-            "*ДД.ММ.РРРР - ДД.ММ.РРРР*\n\n"
-            "Наприклад: 01.11.2024 - 30.11.2024",
-            parse_mode="Markdown"
+            "ДД.ММ.РРРР - ДД.ММ.РРРР\n\n"
+            "Наприклад: 01.11.2024 - 30.11.2024"
         )
         context.user_data["state"] = "admin_custom_period"
         return
@@ -1823,7 +1824,7 @@ async def generate_admin_report(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text("📋 Немає даних за цей період.")
             return
         
-        text = f"📊 *Звіт по інструкторах {period_text}*\n\n"
+        text = f"📊 Звіт по інструкторах {period_text}\n\n"
         text += f"📅 Період: {date_from} - {date_to}\n\n"
         
         total_lessons = 0
@@ -1835,7 +1836,7 @@ async def generate_admin_report(update: Update, context: ContextTypes.DEFAULT_TY
                 hours = hours or 0
                 earnings = hours * 400
                 
-                text += f"👨‍🏫 *{name}*\n"
+                text += f"👨‍🏫 {name}\n"
                 text += f"   📝 Занять: {lessons}\n"
                 text += f"   ⏱ Годин: {hours:.1f}\n"
                 text += f"   💰 Заробіток: {earnings:.0f} грн\n"
@@ -1846,12 +1847,13 @@ async def generate_admin_report(update: Update, context: ContextTypes.DEFAULT_TY
                 total_hours += hours
                 total_earnings += earnings
         
-        text += f"\n📊 *ЗАГАЛОМ:*\n"
+        text += f"\n📊 ЗАГАЛОМ:\n"
         text += f"📝 Занять: {total_lessons}\n"
         text += f"⏱ Годин: {total_hours:.1f}\n"
         text += f"💰 Заробіток: {total_earnings:.0f} грн\n"
         
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text)
+        await show_admin_panel(update, context)
         
     except Exception as e:
         logger.error(f"Error in generate_admin_report: {e}", exc_info=True)
