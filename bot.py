@@ -1037,16 +1037,17 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
     today = datetime.now().date()
     
     if text == "📊 За сьогодні":
-        date_from = today.strftime("%Y-%m-%d")
-        date_to = today.strftime("%Y-%m-%d")
+        # ВАЖЛИВО: використовуємо ДД.ММ.РРРР бо в lessons.date зберігається саме так!
+        date_from = today.strftime("%d.%m.%Y")
+        date_to = today.strftime("%d.%m.%Y")
         period_text = "сьогодні"
     elif text == "📊 За тиждень":
-        date_from = (today - timedelta(days=7)).strftime("%Y-%m-%d")
-        date_to = today.strftime("%Y-%m-%d")
+        date_from = (today - timedelta(days=7)).strftime("%d.%m.%Y")
+        date_to = today.strftime("%d.%m.%Y")
         period_text = "за тиждень"
     elif text == "📊 За місяць":
-        date_from = (today - timedelta(days=30)).strftime("%Y-%m-%d")
-        date_to = today.strftime("%Y-%m-%d")
+        date_from = (today - timedelta(days=30)).strftime("%d.%m.%Y")
+        date_to = today.strftime("%d.%m.%Y")
         period_text = "за місяць"
     elif text == "📊 Свій період":
         context.user_data["state"] = "stats_custom_period"
