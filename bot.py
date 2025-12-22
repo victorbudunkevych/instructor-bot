@@ -501,6 +501,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_stats_period(update, context)
             return
         
+        if state == "stats_custom_period":
+            await handle_stats_custom_period(update, context)
+            return
+        
         # === ОЦІНЮВАННЯ УЧНЯ ===
         if state in ["rating_select_lesson", "rating_give_score", "rating_give_feedback"]:
             await handle_rating_flow(update, context)
@@ -1062,6 +1066,54 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     await show_instructor_stats(update, context, instructor_id, date_from, date_to, period_text)
+
+async def handle_stats_custom_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введеного користувачем періоду"""
+    text = update.message.text
+    user_id = update.message.from_user.id
+    
+    if text == "🔙 Назад":
+        await show_instructor_stats_menu(update, context)
+        return
+    
+    try:
+        # Парсимо період: "01.12.2025 - 22.12.2025"
+        import re
+        match = re.match(r'(\d{2}\.\d{2}\.\d{4})\s*-\s*(\d{2}\.\d{2}\.\d{4})', text)
+        
+        if not match:
+            await update.message.reply_text(
+                "⚠️ Невірний формат!\n\n"
+                "Використовуйте: ДД.ММ.РРРР - ДД.ММ.РРРР\n"
+                "Наприклад: 01.12.2024 - 31.12.2024"
+            )
+            return
+        
+        date_from = match.group(1)
+        date_to = match.group(2)
+        
+        # Перевіряємо що дати валідні
+        from datetime import datetime
+        try:
+            datetime.strptime(date_from, "%d.%m.%Y")
+            datetime.strptime(date_to, "%d.%m.%Y")
+        except ValueError:
+            await update.message.reply_text("⚠️ Невірна дата! Перевірте формат.")
+            return
+        
+        instructor_data = get_instructor_by_telegram_id(user_id)
+        if not instructor_data:
+            await update.message.reply_text("❌ Помилка.")
+            return
+        
+        instructor_id = instructor_data[0]
+        period_text = f"{date_from} - {date_to}"
+        
+        await show_instructor_stats(update, context, instructor_id, date_from, date_to, period_text)
+        
+    except Exception as e:
+        logger.error(f"Error in handle_stats_custom_period: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка обробки періоду.")
 
 async def show_instructor_stats(update: Update, context: ContextTypes.DEFAULT_TYPE, instructor_id, date_from, date_to, period_text):
     """Показати статистику інструктора"""
@@ -1965,7 +2017,9 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             
             if first_lesson:
                 first_date = datetime.strptime(first_lesson, "%d.%m.%Y")
-                days_learning = (now - first_date).days
+                # Прибираємо timezone з now для порівняння
+                now_naive = now.replace(tzinfo=None)
+                days_learning = (now_naive - first_date).days
                 weeks_learning = days_learning / 7
                 avg_hours_per_week = completed_hours / weeks_learning if weeks_learning > 0 else 0
             else:
