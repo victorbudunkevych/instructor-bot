@@ -2005,26 +2005,18 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             completed_hours = completed[1] or 0
             completed_cost = completed[2] or 0
             
-            # ========== ПРОГРЕС ==========
+            # ========== ПРОГРЕС (НА ОСНОВІ ОЦІНОК) ==========
             cursor.execute("""
-                SELECT MIN(date)
+                SELECT AVG(rating), COUNT(rating)
                 FROM lessons
                 WHERE student_telegram_id = ?
                 AND status = 'completed'
+                AND rating IS NOT NULL
             """, (user_id,))
             
-            first_lesson = cursor.fetchone()[0]
-            
-            if first_lesson:
-                first_date = datetime.strptime(first_lesson, "%d.%m.%Y")
-                # Прибираємо timezone з now для порівняння
-                now_naive = now.replace(tzinfo=None)
-                days_learning = (now_naive - first_date).days
-                weeks_learning = days_learning / 7
-                avg_hours_per_week = completed_hours / weeks_learning if weeks_learning > 0 else 0
-            else:
-                days_learning = 0
-                avg_hours_per_week = 0
+            rating_data = cursor.fetchone()
+            avg_rating = rating_data[0] or 0
+            rated_lessons = rating_data[1] or 0
             
             # ========== ІНСТРУКТОРИ ==========
             cursor.execute("""
@@ -2058,11 +2050,10 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
         else:
             text += "   Поки немає завершених уроків\n\n"
         
-        # Прогрес
-        if days_learning > 0:
+        # Прогрес (на основі оцінок)
+        if rated_lessons > 0:
             text += "📈 ПРОГРЕС\n"
-            text += f"   {days_learning} {'день' if days_learning == 1 else 'дні' if days_learning < 5 else 'днів'} | "
-            text += f"{avg_hours_per_week:.1f} год/тиждень\n\n"
+            text += f"   ⭐ Середня оцінка: {avg_rating:.1f}/5 (за {rated_lessons} {'урок' if rated_lessons == 1 else 'уроки' if rated_lessons < 5 else 'уроків'})\n\n"
         
         # Інструктори
         if instructors:
