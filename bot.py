@@ -140,15 +140,23 @@ def get_available_time_slots(instructor_name, date_str):
         date_obj = datetime.strptime(date_str, "%d.%m.%Y")
         now = datetime.now(TZ)
         is_today = date_obj.date() == now.date()
-        current_hour = now.hour
         
         # Всі можливі слоти
         all_slots = []
-        start_hour = WORK_HOURS_START
         
-        # Якщо це сьогодні - починаємо мінімум через 1 годину
+        # Якщо це сьогодні - слоти мають бути мінімум через 1 годину
         if is_today:
-            start_hour = max(current_hour + 1, WORK_HOURS_START)
+            # Поточний час + 1 година
+            min_time = now + timedelta(hours=1)
+            min_hour = min_time.hour
+            
+            # Якщо є хвилини - починаємо з наступної години
+            if min_time.minute > 0:
+                min_hour += 1
+            
+            start_hour = max(min_hour, WORK_HOURS_START)
+        else:
+            start_hour = WORK_HOURS_START
         
         hour = start_hour
         while hour < WORK_HOURS_END:
@@ -193,13 +201,6 @@ def get_available_time_slots(instructor_name, date_str):
             if slot not in blocked_hours
             and not is_time_blocked(instructor_id, date_formatted, slot)
         ]
-        
-        # Якщо сьогодні - додаткова фільтрація (мінімум +1 година)
-        if is_today:
-            free_slots = [
-                slot for slot in free_slots
-                if int(slot.split(':')[0]) >= current_hour + 1
-            ]
         
         return free_slots
         
@@ -307,7 +308,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(
                     "⚠️ *Для запису на заняття потрібна реєстрація*\n\n"
                     "Зверніться до адміністратора за посиланням для реєстрації.\n\n"
-                    "📞 Контакт: @ваш_адмін",
+                    "📞 Контакт: @ваш\\_адмін",
                     parse_mode="Markdown"
                 )
         
