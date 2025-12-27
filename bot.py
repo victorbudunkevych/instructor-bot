@@ -292,6 +292,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 keyboard = [
                     [KeyboardButton("🚀 Записатися на заняття")],
                     [KeyboardButton("📋 Мої записи")],
+                    [KeyboardButton("❌ Скасувати запис")],
                     [KeyboardButton("📊 Моя статистика")]
                 ]
                 
@@ -537,6 +538,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if text == "📖 Мої записи" or text == "📋 Мої записи":
             await show_student_lessons(update, context)
+            return
+        
+        if text == "❌ Скасувати запис":
+            await show_lessons_to_cancel(update, context)
+            return
+        
+        # === СКАСУВАННЯ ЗАПИСУ ===
+        if state == "cancel_lesson_select":
+            await handle_cancel_lesson(update, context)
+            return
+        
+        if state == "cancel_lesson_confirm":
+            await handle_cancel_confirmation(update, context)
             return
         
         # === ПІДТВЕРДЖЕННЯ ===
@@ -2069,6 +2083,230 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
     except Exception as e:
         logger.error(f"Error in show_student_statistics: {e}", exc_info=True)
         await update.message.reply_text("❌ Помилка завантаження статистики.")
+
+# ======================= CANCEL LESSON FUNCTIONS =======================
+async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показати уроки які можна скасувати"""
+    user_id = update.message.from_user.id
+    
+    try:
+        now = datetime.now(TZ)
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT l.id, l.date, l.time, l.duration, i.name
+                FROM lessons l
+                JOIN instructors i ON l.instructor_id = i.id
+                WHERE l.student_telegram_id = ? AND l.status = 'active'
+                ORDER BY l.date, l.time
+                LIMIT 10
+            """, (user_id,))
+            
+            lessons = cursor.fetchall()
+        
+        if not lessons:
+            await update.message.reply_text("📋 У вас немає активних записів на заняття.")
+            return
+        
+        # Фільтруємо уроки - залишаємо тільки ті що >24 години
+        cancelable_lessons = []
+        
+        for lesson_id, date, time, duration, instructor_name in lessons:
+            try:
+                # Парсимо дату і час уроку
+                lesson_datetime = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
+                lesson_datetime = TZ.localize(lesson_datetime)
+                
+                # Скільки годин до уроку
+                hours_until = (lesson_datetime - now).total_seconds() / 3600
+                
+                if hours_until >= 24:
+                    cancelable_lessons.append((lesson_id, date, time, duration, instructor_name, hours_until))
+            except Exception as e:
+                logger.error(f"Error parsing lesson time: {e}")
+                continue
+        
+        if not cancelable_lessons:
+            await update.message.reply_text(
+                "⚠️ Немає уроків які можна скасувати\n\n"
+                "Скасування можливе мінімум за 24 години до уроку."
+            )
+            return
+        
+        # Зберігаємо в context
+        context.user_data["cancelable_lessons"] = cancelable_lessons
+        context.user_data["state"] = "cancel_lesson_select"
+        
+        text = "❌ *Скасування запису*\n\n"
+        text += "Оберіть урок для скасування:\n\n"
+        
+        keyboard = []
+        
+        for i, (lesson_id, date, time, duration, instructor_name, hours_until) in enumerate(cancelable_lessons, 1):
+            text += f"{i}. {date} {time} ({duration})\n"
+            text += f"   👨‍🏫 {instructor_name}\n"
+            text += f"   ⏰ Залишилось {int(hours_until)} год\n\n"
+            keyboard.append([KeyboardButton(f"{i}")])
+        
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        await update.message.reply_text(
+            text,
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in show_lessons_to_cancel: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка завантаження записів.")
+
+async def handle_cancel_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору уроку для скасування"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data.clear()
+        await start(update, context)
+        return
+    
+    try:
+        lesson_index = int(text) - 1
+        lessons = context.user_data.get("cancelable_lessons", [])
+        
+        if lesson_index < 0 or lesson_index >= len(lessons):
+            await update.message.reply_text("⚠️ Невірний номер. Спробуйте ще раз:")
+            return
+        
+        selected = lessons[lesson_index]
+        lesson_id, date, time, duration, instructor_name, hours_until = selected
+        
+        # Зберігаємо вибраний урок
+        context.user_data["cancel_lesson_id"] = lesson_id
+        context.user_data["cancel_lesson_date"] = date
+        context.user_data["cancel_lesson_time"] = time
+        context.user_data["cancel_lesson_instructor"] = instructor_name
+        context.user_data["state"] = "cancel_lesson_confirm"
+        
+        keyboard = [
+            [KeyboardButton("✅ Так, скасувати")],
+            [KeyboardButton("🔙 Ні, залишити")]
+        ]
+        
+        await update.message.reply_text(
+            f"⚠️ *Підтвердіть скасування*\n\n"
+            f"📅 Дата: {date}\n"
+            f"🕐 Час: {time}\n"
+            f"⏱ Тривалість: {duration}\n"
+            f"👨‍🏫 Інструктор: {instructor_name}\n\n"
+            f"Скасувати урок?",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        
+    except ValueError:
+        await update.message.reply_text("⚠️ Введіть номер уроку:")
+        return
+    except Exception as e:
+        logger.error(f"Error in handle_cancel_lesson: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка.")
+
+async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка підтвердження скасування"""
+    text = update.message.text
+    
+    if text == "🔙 Ні, залишити":
+        context.user_data.clear()
+        await update.message.reply_text("✅ Запис залишено без змін.")
+        await start(update, context)
+        return
+    
+    if text != "✅ Так, скасувати":
+        await update.message.reply_text("⚠️ Оберіть дію з меню:")
+        return
+    
+    try:
+        lesson_id = context.user_data.get("cancel_lesson_id")
+        date = context.user_data.get("cancel_lesson_date")
+        time = context.user_data.get("cancel_lesson_time")
+        instructor_name = context.user_data.get("cancel_lesson_instructor")
+        
+        user_id = update.message.from_user.id
+        
+        # Отримуємо дані учня та інструктора
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # Дані уроку
+            cursor.execute("""
+                SELECT student_name, student_phone, student_tariff, duration, instructor_id
+                FROM lessons
+                WHERE id = ?
+            """, (lesson_id,))
+            
+            lesson_data = cursor.fetchone()
+            
+            if not lesson_data:
+                await update.message.reply_text("❌ Урок не знайдено.")
+                return
+            
+            student_name, student_phone, student_tariff, duration, instructor_id = lesson_data
+            
+            # Оновлюємо статус уроку
+            cursor.execute("""
+                UPDATE lessons
+                SET status = 'cancelled',
+                    cancelled_by = 'student',
+                    cancelled_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (lesson_id,))
+            
+            # Отримуємо telegram_id інструктора
+            cursor.execute("SELECT telegram_id FROM instructors WHERE id = ?", (instructor_id,))
+            instructor_telegram_id = cursor.fetchone()[0]
+            
+            conn.commit()
+        
+        # Повідомлення учню
+        await update.message.reply_text(
+            f"✅ *Урок скасовано!*\n\n"
+            f"📅 {date} {time}\n"
+            f"👨‍🏫 {instructor_name}",
+            parse_mode="Markdown"
+        )
+        
+        # Повідомлення інструктору
+        if instructor_telegram_id:
+            try:
+                # Розрахунок вартості
+                if student_tariff and "2" in duration:
+                    price = student_tariff * 2
+                elif student_tariff:
+                    price = student_tariff
+                else:
+                    price = PRICES.get(duration, 400)
+                
+                await context.bot.send_message(
+                    chat_id=instructor_telegram_id,
+                    text=f"🔔 *Урок скасовано учнем*\n\n"
+                         f"👤 Учень: {student_name}\n"
+                         f"📱 Телефон: {student_phone}\n"
+                         f"📅 Дата: {date}\n"
+                         f"🕐 Час: {time}\n"
+                         f"⏱ Тривалість: {duration}\n"
+                         f"💰 Сума: {price:.0f} грн",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify instructor: {e}")
+        
+        context.user_data.clear()
+        await start(update, context)
+        
+    except Exception as e:
+        logger.error(f"Error in handle_cancel_confirmation: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка скасування.")
+
 
 async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Зберегти заняття в БД"""
