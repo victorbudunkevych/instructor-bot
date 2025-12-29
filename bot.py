@@ -78,7 +78,7 @@ TZ = pytz.timezone(TIMEZONE)
 def ensure_instructors_exist():
     """Автоматично додає інструкторів якщо їх немає в базі"""
     instructors = [
-        (662748304, 'Мартович Владислав', '+380000000000', 'Автомат', 490),
+        (662748304, 'Гошовська Інна', '+380000000000', 'Автомат', 490),
         (666619757, 'Фірсов Артур', '+380000000000', 'Механіка', 550),
         (982534001, 'Будункевич Мирослав', '+380000000000', 'Механіка', 550),
         (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 490),
@@ -113,17 +113,31 @@ def is_instructor(telegram_id):
     return instructor is not None
 
 # ======================= HELPERS =======================
-def get_next_dates(days=14):
-    """Генерує список дат на найближчі N днів"""
+def get_next_dates(days=14, instructor_name=None):
+    """Генерує список дат на найближчі N днів з кількістю вільних годин"""
     dates = []
     today = datetime.now().date()
     
     for i in range(days):
         date = today + timedelta(days=i)
+        date_formatted = date.strftime('%d.%m.%Y')
+        
         # Форматуємо дату: "Пн 13.12.2024"
         weekday = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"][date.weekday()]
-        formatted = f"{weekday} {date.strftime('%d.%m.%Y')}"
-        dates.append(formatted)
+        
+        # Якщо передано інструктора - рахуємо вільні години
+        if instructor_name:
+            free_slots = get_available_time_slots(instructor_name, date_formatted)
+            free_count = len(free_slots)
+            
+            # Показуємо тільки дні з вільними годинами
+            if free_count > 0:
+                formatted = f"{weekday} {date.strftime('%d.%m')} ({free_count})"
+                dates.append(formatted)
+        else:
+            # Без інструктора - просто дата
+            formatted = f"{weekday} {date.strftime('%d.%m.%Y')}"
+            dates.append(formatted)
     
     return dates
 
@@ -381,6 +395,160 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"📥 Message: '{text}' | State: '{state}'")
     
     try:
+        # === ОЦІНЮВАННЯ ІНСТРУКТОРА УЧНЕМ ===
+        # Крок 1: Отримання оцінки
+        if text in ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]:
+            lesson_data = context.bot_data.get(f"rating_lesson_{user_id}")
+            
+            if lesson_data:
+                # Визначаємо оцінку
+                rating_map = {
+                    "⭐": 1,
+                    "⭐⭐": 2,
+                    "⭐⭐⭐": 3,
+                    "⭐⭐⭐⭐": 4,
+                    "⭐⭐⭐⭐⭐": 5
+                }
+                rating = rating_map.get(text, 5)
+                
+                # Зберігаємо оцінку в БД
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE lessons
+                        SET rating = ?, rated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    """, (rating, lesson_data['lesson_id']))
+                    conn.commit()
+                
+                # Зберігаємо оцінку в контексті для можливого коментаря
+                context.bot_data[f"rating_feedback_{user_id}"] = {
+                    'lesson_id': lesson_data['lesson_id'],
+                    'instructor_name': lesson_data['instructor_name'],
+                    'rating': rating
+                }
+                
+                # Видаляємо попередній контекст
+                del context.bot_data[f"rating_lesson_{user_id}"]
+                
+                # Встановлюємо стан для коментаря
+                context.user_data["state"] = "rating_feedback"
+                
+                # Запитуємо коментар
+                keyboard = [
+                    [KeyboardButton("✍️ Написати коментар")],
+                    [KeyboardButton("⏭️ Пропустити")]
+                ]
+                
+                await update.message.reply_text(
+                    f"✅ *Дякуємо за оцінку!*\n"
+                    f"⭐ Оцінка: {rating}/5\n\n"
+                    f"💬 Хочете залишити коментар?",
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+                    parse_mode="Markdown"
+                )
+                
+                logger.info(f"✅ Учень {user_id} оцінив урок {lesson_data['lesson_id']}: {rating}/5")
+                return
+            else:
+                logger.warning(f"⚠️ Учень {user_id} надіслав оцінку але немає lesson_data")
+        
+        # Пропуск оцінювання
+        if text == "⏭️ Пропустити" and f"rating_lesson_{user_id}" in context.bot_data:
+            lesson_data = context.bot_data.get(f"rating_lesson_{user_id}")
+            del context.bot_data[f"rating_lesson_{user_id}"]
+            
+            await update.message.reply_text(
+                f"✅ Дякуємо!\n\n"
+                f"📅 {lesson_data['date']} {lesson_data['time']}\n"
+                f"👨‍🏫 {lesson_data['instructor_name']}"
+            )
+            
+            logger.info(f"⏭️ Учень {user_id} пропустив оцінювання уроку {lesson_data['lesson_id']}")
+            await start(update, context)
+            return
+        
+        # Крок 2: Обробка запиту на коментар
+        if state == "rating_feedback":
+            feedback_data = context.bot_data.get(f"rating_feedback_{user_id}")
+            
+            if text == "✍️ Написати коментар":
+                # Просимо ввести коментар
+                context.user_data["state"] = "rating_feedback_input"
+                
+                keyboard = [[KeyboardButton("⏭️ Пропустити")]]
+                
+                await update.message.reply_text(
+                    "💬 Введіть ваш коментар:",
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                )
+                return
+            
+            elif text == "⏭️ Пропустити":
+                # Пропускаємо коментар
+                if feedback_data:
+                    del context.bot_data[f"rating_feedback_{user_id}"]
+                    context.user_data.clear()
+                    
+                    await update.message.reply_text(
+                        f"✅ *Дякуємо за відгук!*\n\n"
+                        f"👨‍🏫 {feedback_data['instructor_name']}\n"
+                        f"⭐ Оцінка: {feedback_data['rating']}/5",
+                        parse_mode="Markdown"
+                    )
+                    
+                    logger.info(f"⏭️ Учень {user_id} пропустив коментар для уроку {feedback_data['lesson_id']}")
+                    await start(update, context)
+                    return
+        
+        # Крок 3: Збереження коментаря
+        if state == "rating_feedback_input":
+            feedback_data = context.bot_data.get(f"rating_feedback_{user_id}")
+            
+            if text == "⏭️ Пропустити":
+                # Пропускаємо коментар
+                if feedback_data:
+                    del context.bot_data[f"rating_feedback_{user_id}"]
+                    context.user_data.clear()
+                    
+                    await update.message.reply_text(
+                        f"✅ *Дякуємо за відгук!*\n\n"
+                        f"👨‍🏫 {feedback_data['instructor_name']}\n"
+                        f"⭐ Оцінка: {feedback_data['rating']}/5",
+                        parse_mode="Markdown"
+                    )
+                    
+                    logger.info(f"⏭️ Учень {user_id} пропустив коментар для уроку {feedback_data['lesson_id']}")
+                    await start(update, context)
+                    return
+            else:
+                # Зберігаємо коментар
+                feedback_text = text
+                
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE lessons
+                        SET feedback = ?
+                        WHERE id = ?
+                    """, (feedback_text, feedback_data['lesson_id']))
+                    conn.commit()
+                
+                del context.bot_data[f"rating_feedback_{user_id}"]
+                context.user_data.clear()
+                
+                await update.message.reply_text(
+                    f"✅ *Дякуємо за відгук!*\n\n"
+                    f"👨‍🏫 {feedback_data['instructor_name']}\n"
+                    f"⭐ Оцінка: {feedback_data['rating']}/5\n"
+                    f"💬 \"{feedback_text}\"",
+                    parse_mode="Markdown"
+                )
+                
+                logger.info(f"✅ Учень {user_id} залишив коментар для уроку {feedback_data['lesson_id']}")
+                await start(update, context)
+                return
+        
         # === РЕЄСТРАЦІЯ УЧНЯ ===
         if state == "registration_name":
             if text == "🔙 Скасувати":
@@ -611,8 +779,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"✅ Інструктор обраний: {instructor_name}")
             logger.info(f"🔄 Стан змінено на: waiting_for_date")
             
-            # Генеруємо дати на 14 днів вперед
-            dates = get_next_dates(14)
+            # Генеруємо дати на 14 днів вперед з кількістю вільних годин
+            dates = get_next_dates(14, instructor_name)
             
             # Робимо кнопки по 2 в рядку
             keyboard = []
@@ -658,10 +826,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Витягуємо дату з формату "Пн 13.12.2024"
+            # Витягуємо дату з формату "Пн 13.12 (3)" або "Пн 13.12.2024"
             date_parts = text.split()
-            if len(date_parts) == 2:
-                date_str = date_parts[1]  # "13.12.2024"
+            if len(date_parts) >= 2:
+                # Можливо формат: "Пн 13.12 (3)" або "Пн 13.12.2024"
+                date_candidate = date_parts[1]  # "13.12" або "13.12.2024"
+                
+                # Якщо короткий формат "13.12" - додаємо рік
+                if date_candidate.count('.') == 1:
+                    current_year = datetime.now().year
+                    date_str = f"{date_candidate}.{current_year}"
+                else:
+                    date_str = date_candidate
             else:
                 date_str = text  # Якщо ввели вручну "13.12.2024"
             
@@ -2630,6 +2806,38 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in send_reminders: {e}", exc_info=True)
 
+async def send_rating_request_to_student(context, student_tg_id, lesson_id, date, time, instructor_name):
+    """Відправити запит на оцінювання інструктора учню"""
+    try:
+        keyboard = [
+            [KeyboardButton("⭐"), KeyboardButton("⭐⭐"), KeyboardButton("⭐⭐⭐")],
+            [KeyboardButton("⭐⭐⭐⭐"), KeyboardButton("⭐⭐⭐⭐⭐")],
+            [KeyboardButton("⏭️ Пропустити")]
+        ]
+        
+        await context.bot.send_message(
+            chat_id=student_tg_id,
+            text=f"✅ *Урок завершено!*\n\n"
+                 f"📅 {date} {time}\n"
+                 f"👨‍🏫 {instructor_name}\n\n"
+                 f"⭐ Оцініть інструктора:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        
+        # Зберігаємо дані уроку для подальшого збереження оцінки
+        context.bot_data[f"rating_lesson_{student_tg_id}"] = {
+            'lesson_id': lesson_id,
+            'instructor_name': instructor_name,
+            'date': date,
+            'time': time
+        }
+        
+        logger.info(f"📤 Відправлено запит на оцінювання учню {student_tg_id} за урок {lesson_id}")
+        
+    except Exception as e:
+        logger.error(f"Error sending rating request: {e}", exc_info=True)
+
 async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
     """Перевірка завершених занять"""
     try:
@@ -2638,16 +2846,18 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Отримуємо всі активні уроки
+            # Отримуємо всі активні уроки з даними про учня та інструктора
             cursor.execute("""
-                SELECT id, date, time
-                FROM lessons
-                WHERE status = 'active'
+                SELECT l.id, l.date, l.time, l.student_telegram_id, 
+                       l.instructor_id, i.name as instructor_name
+                FROM lessons l
+                JOIN instructors i ON l.instructor_id = i.id
+                WHERE l.status = 'active'
             """)
             
             lessons_to_complete = []
             
-            for lesson_id, date_str, time_str in cursor.fetchall():
+            for lesson_id, date_str, time_str, student_tg_id, instructor_id, instructor_name in cursor.fetchall():
                 try:
                     # Конвертуємо дату з ДД.ММ.РРРР в datetime
                     lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
@@ -2655,22 +2865,43 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
                     
                     # Якщо урок вже минув
                     if lesson_datetime < now:
-                        lessons_to_complete.append(lesson_id)
+                        lessons_to_complete.append({
+                            'id': lesson_id,
+                            'date': date_str,
+                            'time': time_str,
+                            'student_tg_id': student_tg_id,
+                            'instructor_id': instructor_id,
+                            'instructor_name': instructor_name
+                        })
                 except Exception as e:
                     logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
             
             # Оновлюємо статус
-            for lesson_id in lessons_to_complete:
+            for lesson in lessons_to_complete:
                 cursor.execute("""
                     UPDATE lessons
                     SET status = 'completed', completed_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                """, (lesson_id,))
+                """, (lesson['id'],))
             
             conn.commit()
             
             if lessons_to_complete:
                 logger.info(f"Completed {len(lessons_to_complete)} lessons")
+                
+                # Відправляємо запит на оцінювання учням
+                for lesson in lessons_to_complete:
+                    try:
+                        await send_rating_request_to_student(
+                            context, 
+                            lesson['student_tg_id'],
+                            lesson['id'],
+                            lesson['date'],
+                            lesson['time'],
+                            lesson['instructor_name']
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send rating request for lesson {lesson['id']}: {e}")
         
     except Exception as e:
         logger.error(f"Error in check_completed_lessons: {e}", exc_info=True)
