@@ -27,15 +27,11 @@ try:
     if ADMIN_ID == 0:
         from config import ADMIN_ID
     TIMEZONE = os.environ.get('TIMEZONE', 'Europe/Kyiv')
-    
-    # SUPERADMIN (твій Telegram ID)
-    SUPERADMIN_ID = int(os.environ.get('SUPERADMIN_ID', '669706811'))
 except ImportError:
     # Якщо config.py не існує на Render
     TOKEN = os.environ['BOT_TOKEN']
     ADMIN_ID = int(os.environ['ADMIN_ID'])
     TIMEZONE = os.environ.get('TIMEZONE', 'Europe/Kyiv')
-    SUPERADMIN_ID = int(os.environ.get('SUPERADMIN_ID', '669706811'))
 
 # Робочі години
 WORK_HOURS_START = 8
@@ -248,23 +244,6 @@ def is_admin(user_id):
     """Перевірка чи користувач є адміном"""
     return user_id == ADMIN_ID
 
-def is_superadmin(user_id):
-    """Перевірка чи користувач є суперадміном"""
-    return user_id == SUPERADMIN_ID
-
-def get_user_role(user_id):
-    """Визначає роль користувача"""
-    if is_superadmin(user_id):
-        return 'superadmin'
-    if is_admin(user_id):
-        return 'admin'
-    if is_instructor(user_id):
-        return 'instructor'
-    from database import get_student_by_telegram_id
-    if get_student_by_telegram_id(user_id):
-        return 'student'
-    return None
-
 # ======================= START =======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Головне меню"""
@@ -287,41 +266,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
 
     try:
-        role = get_user_role(user_id)
-        
-        # СУПЕРАДМІН
-        if role == 'superadmin':
-            keyboard = [
-                [KeyboardButton("📊 Звіти по інструкторах")],
-                [KeyboardButton("👥 Статистика учнів")],
-                [KeyboardButton("📈 Загальна статистика")],
-                [KeyboardButton("📝 Записати учня")]
-            ]
-            
-            await update.message.reply_text(
-                "👑 *СУПЕРАДМІН ПАНЕЛЬ*\n\n"
-                "Оберіть дію:",
-                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-                parse_mode="Markdown"
-            )
-            return
-        
-        # АДМІН
-        if role == 'admin':
-            keyboard = [
-                [KeyboardButton("📝 Записати учня на урок")],
-                [KeyboardButton("📋 Всі записи")],
-                [KeyboardButton("📊 Звіти")]
-            ]
-            
-            await update.message.reply_text(
-                "⚙️ *АДМІН ПАНЕЛЬ*\n\n"
-                "Оберіть дію:",
-                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-                parse_mode="Markdown"
-            )
-            return
-        
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (user_id,))
@@ -745,28 +689,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state in ["schedule_menu", "block_choose_date", "block_choose_time_start", 
                      "block_choose_time_end", "block_choose_reason", "unblock_choose_date"]:
             await handle_schedule_management(update, context)
-            return
-
-        # === МЕНЮ СУПЕРАДМІНА ===
-        if text == "📊 Звіти по інструкторах":
-            await show_superadmin_reports(update, context)
-            return
-        
-        if text == "📊 Всі інструктори разом":
-            await show_all_instructors_report(update, context)
-            return
-        
-        if text == "👥 Статистика учнів":
-            await show_students_statistics(update, context)
-            return
-        
-        if text == "📈 Загальна статистика":
-            await show_all_instructors_report(update, context)
-            return
-        
-        # === МЕНЮ АДМІНА ===
-        if text == "📝 Записати учня на урок" or text == "📝 Записати учня":
-            await admin_book_lesson_start(update, context)
             return
 
         # === МЕНЮ СТУДЕНТА ===
@@ -2773,166 +2695,6 @@ async def handle_unblock_callback(query, context, block_id):
     except Exception as e:
         logger.error(f"Error in handle_unblock_callback: {e}", exc_info=True)
         await query.edit_message_text("❌ Помилка.")
-
-# ======================= SUPERADMIN & ADMIN FUNCTIONS =======================
-async def show_superadmin_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Звіти по інструкторах для суперадміна"""
-    keyboard = [
-        [KeyboardButton("📊 Всі інструктори разом")],
-        [KeyboardButton("👨‍🏫 Окремо по кожному")],
-        [KeyboardButton("🔙 Назад")]
-    ]
-    
-    await update.message.reply_text(
-        "📊 *ЗВІТИ ПО ІНСТРУКТОРАХ*\n\n"
-        "Оберіть тип звіту:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode="Markdown"
-    )
-
-async def show_all_instructors_report(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Загальний звіт по всіх інструкторах"""
-    try:
-        now = datetime.now(TZ)
-        month_ago = now - timedelta(days=30)
-        date_from = month_ago.strftime("%d.%m.%Y")
-        date_to = now.strftime("%d.%m.%Y")
-        
-        with get_db() as conn:
-            cursor = conn.cursor()
-            
-            # Отримуємо всіх інструкторів
-            cursor.execute("SELECT id, name FROM instructors WHERE active = 1")
-            instructors = cursor.fetchall()
-            
-            text = f"📊 *ЗАГАЛЬНИЙ ЗВІТ* ({date_from} - {date_to})\n\n"
-            
-            total_lessons = 0
-            total_hours = 0
-            total_earnings = 0
-            
-            for instructor_id, instructor_name in instructors:
-                # Статистика по інструктору
-                cursor.execute("""
-                    SELECT COUNT(*), 
-                           SUM(CASE 
-                               WHEN duration LIKE '%2%' THEN 2
-                               WHEN duration LIKE '%1.5%' THEN 1.5
-                               ELSE 1
-                           END),
-                           SUM(CASE 
-                               WHEN duration LIKE '%2%' THEN student_tariff * 2
-                               ELSE student_tariff
-                           END),
-                           AVG(rating)
-                    FROM lessons
-                    WHERE instructor_id = ? 
-                    AND status = 'completed'
-                    AND date BETWEEN ? AND ?
-                """, (instructor_id, date_from, date_to))
-                
-                stats = cursor.fetchone()
-                lessons = stats[0] or 0
-                hours = stats[1] or 0
-                earnings = stats[2] or 0
-                rating = stats[3] or 0
-                
-                if lessons > 0:
-                    text += f"👨‍🏫 *{instructor_name}*\n"
-                    text += f"   📝 Занять: {lessons} | ⏱ Годин: {hours:.1f}\n"
-                    text += f"   💰 Заробіток: {earnings:,.0f} грн\n"
-                    text += f"   ⭐ Рейтинг: {rating:.1f}/5\n\n"
-                    
-                    total_lessons += lessons
-                    total_hours += hours
-                    total_earnings += earnings
-            
-            text += "━━━━━━━━━━━━━━━━━━━\n"
-            text += f"📊 *ЗАГАЛОМ:*\n"
-            text += f"📝 Занять: {total_lessons}\n"
-            text += f"⏱ Годин: {total_hours:.1f}\n"
-            text += f"💰 Заробіток: {total_earnings:,.0f} грн\n"
-            
-            await update.message.reply_text(text, parse_mode="Markdown")
-            
-    except Exception as e:
-        logger.error(f"Error in show_all_instructors_report: {e}", exc_info=True)
-        await update.message.reply_text("❌ Помилка генерації звіту.")
-
-async def show_students_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Статистика по учнях"""
-    try:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            
-            # Топ-10 активних учнів
-            cursor.execute("""
-                SELECT s.name, s.phone, s.tariff,
-                       COUNT(l.id) as lessons_count,
-                       SUM(CASE 
-                           WHEN l.duration LIKE '%2%' THEN s.tariff * 2
-                           ELSE s.tariff
-                       END) as total_paid,
-                       AVG(l.rating) as avg_rating
-                FROM students s
-                LEFT JOIN lessons l ON s.telegram_id = l.student_telegram_id 
-                    AND l.status = 'completed'
-                GROUP BY s.telegram_id
-                ORDER BY lessons_count DESC
-                LIMIT 10
-            """)
-            
-            students = cursor.fetchall()
-            
-            text = "👥 *СТАТИСТИКА УЧНІВ*\n\n"
-            text += "Топ-10 активних учнів:\n\n"
-            
-            total_students = 0
-            total_lessons_all = 0
-            total_revenue = 0
-            
-            for i, (name, phone, tariff, lessons, paid, rating) in enumerate(students, 1):
-                if lessons and lessons > 0:
-                    text += f"{i}. *{name}*\n"
-                    text += f"   📝 Уроків: {lessons} | 💰 Сплачено: {paid:,.0f} грн\n"
-                    if rating:
-                        text += f"   ⭐ Середня оцінка: {rating:.1f}\n"
-                    text += "\n"
-                    
-                    total_students += 1
-                    total_lessons_all += lessons
-                    total_revenue += paid or 0
-            
-            # Загальна статистика
-            cursor.execute("SELECT COUNT(*) FROM students")
-            all_students = cursor.fetchone()[0]
-            
-            text += "━━━━━━━━━━━━━━━━━━━\n"
-            text += f"📊 *Загалом:*\n"
-            text += f"👥 Всього учнів: {all_students}\n"
-            text += f"👥 Активних: {total_students}\n"
-            text += f"📝 Уроків: {total_lessons_all}\n"
-            text += f"💰 Обіг: {total_revenue:,.0f} грн\n"
-            
-            await update.message.reply_text(text, parse_mode="Markdown")
-            
-    except Exception as e:
-        logger.error(f"Error in show_students_statistics: {e}", exc_info=True)
-        await update.message.reply_text("❌ Помилка завантаження статистики.")
-
-async def admin_book_lesson_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Початок запису учня адміном"""
-    context.user_data["state"] = "admin_book_phone"
-    context.user_data["booking_as_admin"] = True
-    
-    keyboard = [[KeyboardButton("🔙 Скасувати")]]
-    
-    await update.message.reply_text(
-        "📝 *ЗАПИС УЧНЯ НА УРОК*\n\n"
-        "Введіть номер телефону учня:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode="Markdown"
-    )
 
 # ======================= REMINDERS =======================
 async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
