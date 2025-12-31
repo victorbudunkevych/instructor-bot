@@ -17,6 +17,8 @@ from telegram.ext import (
     filters
 )
 import pytz
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill
 
 # ==================== ТЕСТОВА КОНФІГУРАЦІЯ ====================
 # ТЕСТОВИЙ БОТ TOKEN
@@ -627,6 +629,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ У вас немає доступу.")
                 return
             await show_admin_panel(update, context)
+            return
+        
+        if text == "📥 Експорт в Excel":
+            await export_to_excel(update, context)
             return
         
         if state == "admin_panel":
@@ -1998,6 +2004,7 @@ async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [KeyboardButton("📊 Звіт по інструкторах")],
         [KeyboardButton("👥 Список інструкторів")],
+        [KeyboardButton("📥 Експорт в Excel")],
         [KeyboardButton("🔙 Назад")]
     ]
     
@@ -2914,6 +2921,195 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Error in check_completed_lessons: {e}", exc_info=True)
+
+# ======================= EXPORT TO EXCEL =======================
+async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Експорт всіх даних в Excel"""
+    user_id = update.message.from_user.id
+    
+    # Перевірка прав доступу (тільки адміни)
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ У вас немає доступу до цієї функції.")
+        return
+    
+    try:
+        await update.message.reply_text("⏳ Генерую Excel файл... Зачекайте...")
+        
+        # Створюємо Excel workbook
+        wb = Workbook()
+        
+        # ============ ЛИСТ 1: УРОКИ ============
+        ws1 = wb.active
+        ws1.title = "Уроки"
+        
+        # Заголовки
+        headers1 = ["ID", "Дата", "Час", "Інструктор", "Учень", "Телефон", "Тариф", "Тривалість", "Вартість", "Статус", "Оцінка учня", "Коментар"]
+        ws1.append(headers1)
+        
+        # Стилізація заголовків
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        
+        for cell in ws1[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Дані уроків
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    l.id,
+                    l.date,
+                    l.time,
+                    i.name as instructor_name,
+                    s.name as student_name,
+                    s.phone as student_phone,
+                    s.tariff,
+                    l.duration_hours,
+                    l.earnings,
+                    l.status,
+                    l.rating,
+                    l.feedback
+                FROM lessons l
+                LEFT JOIN instructors i ON l.instructor_id = i.id
+                LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
+                ORDER BY l.date DESC, l.time DESC
+            """)
+            lessons = cursor.fetchall()
+            
+            for lesson in lessons:
+                ws1.append(lesson)
+        
+        # Автоширина колонок
+        for column in ws1.columns:
+            max_length = 0
+            column = [cell for cell in column]
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws1.column_dimensions[column[0].column_letter].width = adjusted_width
+        
+        # ============ ЛИСТ 2: УЧНІ ============
+        ws2 = wb.create_sheet(title="Учні")
+        
+        headers2 = ["ID", "Ім'я", "Телефон", "Тариф", "Telegram ID", "Дата реєстрації"]
+        ws2.append(headers2)
+        
+        # Стилізація
+        for cell in ws2[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Дані учнів
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, name, phone, tariff, telegram_id, created_at
+                FROM students
+                ORDER BY created_at DESC
+            """)
+            students = cursor.fetchall()
+            
+            for student in students:
+                ws2.append(student)
+        
+        # Автоширина
+        for column in ws2.columns:
+            max_length = 0
+            column = [cell for cell in column]
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws2.column_dimensions[column[0].column_letter].width = adjusted_width
+        
+        # ============ ЛИСТ 3: СТАТИСТИКА ІНСТРУКТОРІВ ============
+        ws3 = wb.create_sheet(title="Статистика інструкторів")
+        
+        headers3 = ["Інструктор", "Коробка", "Тариф", "Уроків (всього)", "Годин", "Заробіток", "Рейтинг"]
+        ws3.append(headers3)
+        
+        # Стилізація
+        for cell in ws3[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Дані інструкторів
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    i.name,
+                    i.transmission,
+                    i.tariff,
+                    COUNT(l.id) as total_lessons,
+                    COALESCE(SUM(l.duration_hours), 0) as total_hours,
+                    COALESCE(SUM(l.earnings), 0) as total_earnings,
+                    COALESCE(AVG(CASE WHEN l.rating > 0 THEN l.rating END), 0) as avg_rating
+                FROM instructors i
+                LEFT JOIN lessons l ON i.id = l.instructor_id AND l.status = 'completed'
+                GROUP BY i.id
+                ORDER BY total_lessons DESC
+            """)
+            instructors = cursor.fetchall()
+            
+            for instructor in instructors:
+                row = list(instructor)
+                # Форматуємо рейтинг
+                if row[6]:
+                    row[6] = round(row[6], 1)
+                ws3.append(row)
+        
+        # Автоширина
+        for column in ws3.columns:
+            max_length = 0
+            column = [cell for cell in column]
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws3.column_dimensions[column[0].column_letter].width = adjusted_width
+        
+        # Зберігаємо в BytesIO
+        excel_file = BytesIO()
+        wb.save(excel_file)
+        excel_file.seek(0)
+        
+        # Відправляємо файл
+        now = datetime.now(TZ)
+        filename = f"driving_school_export_{now.strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        await update.message.reply_document(
+            document=excel_file,
+            filename=filename,
+            caption=f"📊 **Експорт даних автошколи**\n\n"
+                   f"📅 Дата: {now.strftime('%d.%m.%Y %H:%M')}\n"
+                   f"📋 Листів: 3 (Уроки, Учні, Статистика)\n"
+                   f"✅ Готово!",
+            parse_mode="Markdown"
+        )
+        
+        logger.info(f"✅ Excel експорт створено користувачем {user_id}")
+        
+    except Exception as e:
+        logger.error(f"Error in export_to_excel: {e}", exc_info=True)
+        await update.message.reply_text(
+            f"❌ Помилка при створенні Excel файлу:\n{str(e)}"
+        )
 
 # ======================= MAIN =======================
 def main():
