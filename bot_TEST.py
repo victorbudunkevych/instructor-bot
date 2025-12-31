@@ -2967,7 +2967,7 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     s.name as student_name,
                     s.phone as student_phone,
                     s.tariff,
-                    l.duration_hours,
+                    l.duration,
                     l.earnings,
                     l.status,
                     l.rating,
@@ -3054,7 +3054,13 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     i.transmission,
                     i.tariff,
                     COUNT(l.id) as total_lessons,
-                    COALESCE(SUM(l.duration_hours), 0) as total_hours,
+                    SUM(
+                        CASE 
+                            WHEN l.duration LIKE '%2%' THEN 2
+                            WHEN l.duration LIKE '%1.5%' THEN 1.5
+                            ELSE 1
+                        END
+                    ) as total_hours,
                     COALESCE(SUM(l.earnings), 0) as total_earnings,
                     COALESCE(AVG(CASE WHEN l.rating > 0 THEN l.rating END), 0) as avg_rating
                 FROM instructors i
