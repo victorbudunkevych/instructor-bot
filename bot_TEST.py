@@ -3040,7 +3040,7 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ============ ЛИСТ 3: СТАТИСТИКА ІНСТРУКТОРІВ ============
         ws3 = wb.create_sheet(title="Статистика інструкторів")
         
-        headers3 = ["Інструктор", "Коробка", "Тариф", "Уроків (всього)", "Годин", "Заробіток", "Рейтинг"]
+        headers3 = ["Інструктор", "Тариф", "Уроків (всього)", "Годин", "Заробіток", "Рейтинг"]
         ws3.append(headers3)
         
         # Стилізація
@@ -3055,7 +3055,6 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.execute("""
                 SELECT 
                     i.name,
-                    i.transmission,
                     i.tariff,
                     COUNT(l.id) as total_lessons,
                     SUM(
