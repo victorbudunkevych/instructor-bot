@@ -2968,7 +2968,11 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     s.phone as student_phone,
                     s.tariff,
                     l.duration,
-                    l.earnings,
+                    CASE 
+                        WHEN l.duration LIKE '%2%' THEN s.tariff * 2
+                        WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
+                        ELSE s.tariff * 1
+                    END as earnings,
                     l.status,
                     l.rating,
                     l.feedback
@@ -3061,10 +3065,17 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             ELSE 1
                         END
                     ) as total_hours,
-                    COALESCE(SUM(l.earnings), 0) as total_earnings,
+                    SUM(
+                        CASE 
+                            WHEN l.duration LIKE '%2%' THEN s.tariff * 2
+                            WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
+                            ELSE s.tariff * 1
+                        END
+                    ) as total_earnings,
                     COALESCE(AVG(CASE WHEN l.rating > 0 THEN l.rating END), 0) as avg_rating
                 FROM instructors i
                 LEFT JOIN lessons l ON i.id = l.instructor_id AND l.status = 'completed'
+                LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
                 GROUP BY i.id
                 ORDER BY total_lessons DESC
             """)
