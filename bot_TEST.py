@@ -1233,16 +1233,20 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text
     user_id = update.message.from_user.id
     
+    logger.info(f"📊 handle_stats_period: User {user_id}, Text: '{text}'")
+    
     if text == "🔙 Назад":
         await start(update, context)
         return
     
     instructor_data = get_instructor_by_telegram_id(user_id)
     if not instructor_data:
+        logger.error(f"❌ Instructor not found for user {user_id}")
         await update.message.reply_text("❌ Помилка.")
         return
     
     instructor_id, instructor_name = instructor_data
+    logger.info(f"✅ Instructor found: {instructor_name} (ID: {instructor_id})")
     
     today = datetime.now().date()
     
@@ -1255,10 +1259,12 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
         date_from = (today - timedelta(days=7)).strftime("%d.%m.%Y")
         date_to = today.strftime("%d.%m.%Y")
         period_text = "за тиждень"
+        logger.info(f"📅 Period: {date_from} - {date_to}")
     elif text == "📊 За місяць":
         date_from = (today - timedelta(days=30)).strftime("%d.%m.%Y")
         date_to = today.strftime("%d.%m.%Y")
         period_text = "за місяць"
+        logger.info(f"📅 Period: {date_from} - {date_to}")
     elif text == "📊 Свій період":
         context.user_data["state"] = "stats_custom_period"
         await update.message.reply_text(
@@ -1268,9 +1274,11 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     else:
+        logger.warning(f"⚠️ Unknown period button: '{text}'")
         await update.message.reply_text("⚠️ Оберіть період із меню.")
         return
     
+    logger.info(f"🔄 Calling show_instructor_stats...")
     await show_instructor_stats(update, context, instructor_id, date_from, date_to, period_text)
 
 async def handle_stats_custom_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3055,7 +3063,7 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.execute("""
                 SELECT 
                     i.name,
-                    i.tariff,
+                    i.price_per_hour,
                     COUNT(l.id) as total_lessons,
                     SUM(
                         CASE 
