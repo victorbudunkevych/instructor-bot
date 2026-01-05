@@ -3106,20 +3106,50 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             
             all_lessons = cursor.fetchall()
         
+        # === ДІАГНОСТИКА ===
+        logger.info(f"📊 ДІАГНОСТИКА ЕКСПОРТУ")
+        logger.info(f"📅 Період: {date_from} - {date_to}")
+        logger.info(f"🔍 Всього уроків в БД: {len(all_lessons)}")
+        
+        if len(all_lessons) > 0:
+            # Показуємо перші 5 дат
+            sample_dates = [lesson[1] for lesson in all_lessons[:5]]
+            logger.info(f"📝 Перші 5 дат в БД: {sample_dates}")
+        else:
+            logger.warning(f"⚠️ БД порожня! Уроків: 0")
+        # === КІНЕЦЬ ДІАГНОСТИКИ ===
+        
         # Фільтруємо уроки в Python по датах
         from datetime import datetime as dt
         date_from_obj = dt.strptime(date_from, "%d.%m.%Y")
         date_to_obj = dt.strptime(date_to, "%d.%m.%Y")
         
+        logger.info(f"🔄 Початок фільтрації...")
+        logger.info(f"📆 date_from_obj: {date_from_obj}")
+        logger.info(f"📆 date_to_obj: {date_to_obj}")
+        
         lessons = []
+        filtered_out = 0
+        parse_errors = 0
+        
         for lesson in all_lessons:
             try:
                 lesson_date = dt.strptime(lesson[1], "%d.%m.%Y")
                 if date_from_obj <= lesson_date <= date_to_obj:
                     lessons.append(lesson)
-            except (ValueError, TypeError):
+                else:
+                    filtered_out += 1
+            except (ValueError, TypeError) as e:
                 # Пропускаємо уроки з невірним форматом дати
+                parse_errors += 1
+                logger.warning(f"❌ Помилка парсингу дати: {lesson[1]} - {e}")
                 continue
+        
+        # === ПІДСУМОК ДІАГНОСТИКИ ===
+        logger.info(f"✅ Відфільтровано (в період): {len(lessons)}")
+        logger.info(f"🚫 Відфільтровано (поза періодом): {filtered_out}")
+        logger.info(f"❌ Помилки парсингу дат: {parse_errors}")
+        # === КІНЕЦЬ ПІДСУМКУ ===
         
         # Статистика для повідомлення
         total_lessons = len(lessons)
