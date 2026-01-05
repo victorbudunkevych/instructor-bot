@@ -875,8 +875,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             date_obj = datetime.strptime(date_str, "%d.%m.%Y")
-            if date_obj.date() < datetime.now().date():
-                logger.warning(f"⚠️ Минула дата: {date_str}")
+            today = datetime.now(TZ).date()  # З ТАЙМЗОНОЮ!
+            if date_obj.date() < today:
+                logger.warning(f"⚠️ Минула дата: {date_str} (сьогодні: {today})")
                 await update.message.reply_text("⚠️ Неможливо записатися на минулу дату.")
                 return
             
