@@ -3077,7 +3077,7 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Дані уроків З ФІЛЬТРОМ ПО ДАТАХ
+        # Дані уроків - ОТРИМУЄМО ВСІ, ФІЛЬТРУЄМО В PYTHON
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -3101,18 +3101,32 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                 FROM lessons l
                 LEFT JOIN instructors i ON l.instructor_id = i.id
                 LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
-                WHERE l.date BETWEEN ? AND ?
                 ORDER BY l.date DESC, l.time DESC
-            """, (date_from, date_to))
+            """)
             
-            lessons = cursor.fetchall()
-            
-            # Статистика для повідомлення
-            total_lessons = len(lessons)
-            total_earnings = 0
-            unique_students = set()
-            
-            for lesson in lessons:
+            all_lessons = cursor.fetchall()
+        
+        # Фільтруємо уроки в Python по датах
+        from datetime import datetime as dt
+        date_from_obj = dt.strptime(date_from, "%d.%m.%Y")
+        date_to_obj = dt.strptime(date_to, "%d.%m.%Y")
+        
+        lessons = []
+        for lesson in all_lessons:
+            try:
+                lesson_date = dt.strptime(lesson[1], "%d.%m.%Y")
+                if date_from_obj <= lesson_date <= date_to_obj:
+                    lessons.append(lesson)
+            except (ValueError, TypeError):
+                # Пропускаємо уроки з невірним форматом дати
+                continue
+        
+        # Статистика для повідомлення
+        total_lessons = len(lessons)
+        total_earnings = 0
+        unique_students = set()
+        
+        for lesson in lessons:
                 ws1.append(lesson)
                 if lesson[8]:  # earnings
                     total_earnings += lesson[8]
@@ -3143,41 +3157,56 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Дані учнів З ФІЛЬТРОМ ПО ДАТАХ
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT 
-                    s.name,
-                    s.phone,
-                    s.tariff,
-                    COUNT(l.id) as total_lessons,
-                    SUM(
-                        CASE 
-                            WHEN l.duration LIKE '%2%' THEN 2
-                            WHEN l.duration LIKE '%1.5%' THEN 1.5
-                            ELSE 1
-                        END
-                    ) as total_hours,
-                    SUM(
-                        CASE 
-                            WHEN l.duration LIKE '%2%' THEN s.tariff * 2
-                            WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
-                            ELSE s.tariff * 1
-                        END
-                    ) as total_spent
-                FROM students s
-                LEFT JOIN lessons l ON s.telegram_id = l.student_telegram_id 
-                    AND l.date BETWEEN ? AND ?
-                    AND l.status IN ('active', 'completed')
-                GROUP BY s.id
-                HAVING total_lessons > 0
-                ORDER BY total_lessons DESC
-            """, (date_from, date_to))
+        # Дані учнів - використовуємо відфільтровані уроки
+        # Групуємо по учням вручну в Python
+        students_stats = {}
+        
+        for lesson in lessons:
+            student_name = lesson[4]  # s.name
+            student_phone = lesson[5]  # s.phone
+            student_tariff = lesson[6]  # s.tariff
+            duration = lesson[7]  # l.duration
+            earnings = lesson[8]  # earnings
             
-            students = cursor.fetchall()
+            if not student_name or not student_tariff:
+                continue
             
-            for student in students:
+            if student_name not in students_stats:
+                students_stats[student_name] = {
+                    'phone': student_phone,
+                    'tariff': student_tariff,
+                    'lessons': 0,
+                    'hours': 0,
+                    'spent': 0
+                }
+            
+            students_stats[student_name]['lessons'] += 1
+            
+            # Рахуємо години
+            if "1.5" in duration:
+                students_stats[student_name]['hours'] += 1.5
+            elif "2" in duration:
+                students_stats[student_name]['hours'] += 2
+            else:
+                students_stats[student_name]['hours'] += 1
+            
+            # Рахуємо витрати
+            if earnings:
+                students_stats[student_name]['spent'] += earnings
+        
+        # Конвертуємо в список для Excel
+        students = []
+        for name, stats in sorted(students_stats.items(), key=lambda x: x[1]['lessons'], reverse=True):
+            students.append((
+                name,
+                stats['phone'],
+                stats['tariff'],
+                stats['lessons'],
+                stats['hours'],
+                stats['spent']
+            ))
+        
+        for student in students:
                 ws2.append(student)
         
         # Автоширина
@@ -3204,42 +3233,82 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Дані інструкторів З ФІЛЬТРОМ ПО ДАТАХ
+        # Дані інструкторів - використовуємо відфільтровані уроки
+        # Спочатку отримуємо дані інструкторів
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT 
-                    i.name,
-                    i.price_per_hour,
-                    COUNT(l.id) as total_lessons,
-                    SUM(
-                        CASE 
-                            WHEN l.duration LIKE '%2%' THEN 2
-                            WHEN l.duration LIKE '%1.5%' THEN 1.5
-                            ELSE 1
-                        END
-                    ) as total_hours,
-                    SUM(
-                        CASE 
-                            WHEN l.duration LIKE '%2%' THEN s.tariff * 2
-                            WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
-                            ELSE s.tariff * 1
-                        END
-                    ) as total_earnings,
-                    COALESCE(AVG(CASE WHEN l.rating > 0 THEN l.rating END), 0) as avg_rating
-                FROM instructors i
-                LEFT JOIN lessons l ON i.id = l.instructor_id 
-                    AND l.date BETWEEN ? AND ?
-                    AND l.status = 'completed'
-                LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
-                GROUP BY i.id
-                HAVING total_lessons > 0
-                ORDER BY total_lessons DESC
-            """, (date_from, date_to))
+                SELECT id, name, price_per_hour
+                FROM instructors
+            """)
+            all_instructors = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+        
+        # Групуємо статистику по інструкторах
+        instructors_stats = {}
+        
+        for lesson in lessons:
+            # Знаходимо instructor_id через instructor_name
+            instructor_name = lesson[3]  # i.name
+            if not instructor_name:
+                continue
             
-            instructors = cursor.fetchall()
+            # Шукаємо instructor_id
+            instructor_id = None
+            instructor_price = 0
+            for iid, (iname, iprice) in all_instructors.items():
+                if iname == instructor_name:
+                    instructor_id = iid
+                    instructor_price = iprice
+                    break
             
-            for instructor in instructors:
+            if not instructor_id:
+                continue
+            
+            if instructor_id not in instructors_stats:
+                instructors_stats[instructor_id] = {
+                    'name': instructor_name,
+                    'price': instructor_price,
+                    'lessons': 0,
+                    'hours': 0,
+                    'earnings': 0,
+                    'ratings': []
+                }
+            
+            instructors_stats[instructor_id]['lessons'] += 1
+            
+            # Рахуємо години
+            duration = lesson[7]
+            if "1.5" in duration:
+                instructors_stats[instructor_id]['hours'] += 1.5
+            elif "2" in duration:
+                instructors_stats[instructor_id]['hours'] += 2
+            else:
+                instructors_stats[instructor_id]['hours'] += 1
+            
+            # Рахуємо заробіток
+            earnings = lesson[8]
+            if earnings:
+                instructors_stats[instructor_id]['earnings'] += earnings
+            
+            # Збираємо рейтинги
+            rating = lesson[10]
+            if rating and rating > 0:
+                instructors_stats[instructor_id]['ratings'].append(rating)
+        
+        # Конвертуємо в список для Excel
+        instructors = []
+        for iid, stats in sorted(instructors_stats.items(), key=lambda x: x[1]['lessons'], reverse=True):
+            avg_rating = sum(stats['ratings']) / len(stats['ratings']) if stats['ratings'] else 0
+            instructors.append((
+                stats['name'],
+                stats['price'],
+                stats['lessons'],
+                stats['hours'],
+                stats['earnings'],
+                avg_rating
+            ))
+        
+        for instructor in instructors:
                 row = list(instructor)
                 # Форматуємо рейтинг
                 if len(row) > 5 and row[5]:
