@@ -1,4 +1,4 @@
-# database.py - ОНОВЛЕНА ВЕРСІЯ З НОВИМИ ФУНКЦІЯМИ
+# database.py - ВИПРАВЛЕНА ВЕРСІЯ (ФІК ДЛЯ get_instructor_stats_period)
 import sqlite3
 import logging
 from contextlib import contextmanager
@@ -445,60 +445,99 @@ def add_lesson_rating(lesson_id, rating, feedback=""):
 
 # ======================= ЗАПИТИ - СТАТИСТИКА =======================
 def get_instructor_stats_period(instructor_id, date_from, date_to):
-    """НОВА: Статистика інструктора за період"""
+    """
+    ✅ ВИПРАВЛЕНА ВЕРСІЯ: Статистика інструктора за період
+    
+    ❌ ПРОБЛЕМА БУЛА: date формат ДД.ММ.РРРР, але SQL BETWEEN не працює з таким форматом
+    ✅ РІШЕННЯ: Фільтрація в Python після отримання всіх уроків
+    """
     try:
+        # Конвертуємо дати з ДД.ММ.РРРР в datetime для порівняння
+        date_from_obj = datetime.strptime(date_from, "%d.%m.%Y")
+        date_to_obj = datetime.strptime(date_to, "%d.%m.%Y")
+        
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Загальна кількість занять
+            # Отримуємо ВСІ уроки інструктора (без фільтру по даті)
             cursor.execute("""
-                SELECT COUNT(*), 
-                       SUM(CASE WHEN duration LIKE '%1.5%' THEN 1.5
-                                WHEN duration LIKE '%2%' THEN 2
-                                ELSE 1 END) as total_hours
+                SELECT date, duration, rating, status
                 FROM lessons
-                WHERE instructor_id = ? 
-                  AND date BETWEEN ? AND ?
-                  AND status IN ('active', 'completed')
-            """, (instructor_id, date_from, date_to))
+                WHERE instructor_id = ?
+            """, (instructor_id,))
             
-            total_lessons, total_hours = cursor.fetchone()
-            total_hours = total_hours or 0
+            all_lessons = cursor.fetchall()
+        
+        # Фільтруємо уроки в Python
+        filtered_lessons = []
+        for date_str, duration, rating, status in all_lessons:
+            try:
+                lesson_date = datetime.strptime(date_str, "%d.%m.%Y")
+                
+                # Перевіряємо чи урок в потрібному періоді та статусі
+                if (date_from_obj <= lesson_date <= date_to_obj and 
+                    status in ('active', 'completed')):
+                    filtered_lessons.append((date_str, duration, rating, status))
+            except ValueError:
+                # Пропускаємо уроки з невірним форматом дати
+                logger.warning(f"Пропущено урок з невірною датою: {date_str}")
+                continue
+        
+        # Підраховуємо статистику
+        total_lessons = len(filtered_lessons)
+        
+        total_hours = 0
+        ratings = []
+        
+        for date_str, duration, rating, status in filtered_lessons:
+            # Рахуємо години
+            if "1.5" in duration:
+                total_hours += 1.5
+            elif "2" in duration:
+                total_hours += 2
+            else:
+                total_hours += 1
             
-            # Середній рейтинг
+            # Збираємо оцінки
+            if rating is not None and rating > 0:
+                ratings.append(rating)
+        
+        # Середній рейтинг
+        avg_rating = sum(ratings) / len(ratings) if ratings else 0
+        
+        # Скасовані заняття за період
+        with get_db() as conn:
+            cursor = conn.cursor()
             cursor.execute("""
-                SELECT AVG(rating)
+                SELECT date
                 FROM lessons
-                WHERE instructor_id = ? 
-                  AND date BETWEEN ? AND ?
-                  AND rating IS NOT NULL
-            """, (instructor_id, date_from, date_to))
+                WHERE instructor_id = ? AND status = 'cancelled'
+            """, (instructor_id,))
             
-            avg_rating = cursor.fetchone()[0] or 0
-            
-            # Скасовані заняття
-            cursor.execute("""
-                SELECT COUNT(*)
-                FROM lessons
-                WHERE instructor_id = ? 
-                  AND date BETWEEN ? AND ?
-                  AND status = 'cancelled'
-            """, (instructor_id, date_from, date_to))
-            
-            cancelled = cursor.fetchone()[0]
-            
-            # Заробіток (400 грн/год)
-            earnings = total_hours * 400
-            
-            return {
-                'total_lessons': total_lessons or 0,
-                'total_hours': round(total_hours, 1),
-                'earnings': earnings,
-                'avg_rating': round(avg_rating, 1),
-                'cancelled': cancelled
-            }
+            all_cancelled = cursor.fetchall()
+        
+        # Фільтруємо скасовані в Python
+        cancelled = 0
+        for (date_str,) in all_cancelled:
+            try:
+                lesson_date = datetime.strptime(date_str, "%d.%m.%Y")
+                if date_from_obj <= lesson_date <= date_to_obj:
+                    cancelled += 1
+            except ValueError:
+                continue
+        
+        # Заробіток (400 грн/год)
+        earnings = total_hours * 400
+        
+        return {
+            'total_lessons': total_lessons,
+            'total_hours': round(total_hours, 1),
+            'earnings': earnings,
+            'avg_rating': round(avg_rating, 1),
+            'cancelled': cancelled
+        }
     except Exception as e:
-        logger.error(f"Помилка get_instructor_stats_period: {e}")
+        logger.error(f"Помилка get_instructor_stats_period: {e}", exc_info=True)
         return None
 
 def get_admin_report_by_instructors(date_from, date_to):
