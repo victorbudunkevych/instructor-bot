@@ -632,7 +632,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         if text == "📥 Експорт в Excel":
-            await export_to_excel(update, context)
+            await show_export_period_menu(update, context)
             return
         
         if state == "admin_panel":
@@ -641,6 +641,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if state == "admin_report_period":
             await handle_admin_report(update, context)
+            return
+        
+        # === ЕКСПОРТ З ВИБОРОМ ПЕРІОДУ ===
+        if state == "export_period":
+            await handle_export_period_choice(update, context)
+            return
+        
+        if state == "export_custom_period":
+            await handle_export_custom_period(update, context)
             return
 
         # === МЕНЮ ІНСТРУКТОРА ===
@@ -2930,7 +2939,361 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in check_completed_lessons: {e}", exc_info=True)
 
-# ======================= EXPORT TO EXCEL =======================
+# ======================= EXPORT WITH PERIOD SELECTION =======================
+async def show_export_period_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню вибору періоду для експорту"""
+    keyboard = [
+        [KeyboardButton("📊 За тиждень")],
+        [KeyboardButton("📊 За місяць")],
+        [KeyboardButton("📊 За весь час")],
+        [KeyboardButton("📊 Свій період")],
+        [KeyboardButton("🔙 Назад")]
+    ]
+    
+    context.user_data["state"] = "export_period"
+    
+    await update.message.reply_text(
+        "📥 *Експорт в Excel*\n\n"
+        "Оберіть період для експорту:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_export_period_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору періоду"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        await show_admin_panel(update, context)
+        return
+    
+    from datetime import datetime, timedelta
+    today = datetime.now().date()
+    
+    if text == "📊 За тиждень":
+        date_from = (today - timedelta(days=7)).strftime("%d.%m.%Y")
+        date_to = today.strftime("%d.%m.%Y")
+        period_name = "тиждень"
+        
+    elif text == "📊 За місяць":
+        date_from = (today - timedelta(days=30)).strftime("%d.%m.%Y")
+        date_to = today.strftime("%d.%m.%Y")
+        period_name = "місяць"
+        
+    elif text == "📊 За весь час":
+        date_from = "01.01.2020"
+        date_to = today.strftime("%d.%m.%Y")
+        period_name = "весь час"
+        
+    elif text == "📊 Свій період":
+        context.user_data["state"] = "export_custom_period"
+        
+        keyboard = [[KeyboardButton("🔙 Назад")]]
+        
+        await update.message.reply_text(
+            "📅 *Введіть період у форматі:*\n"
+            "`ДД.ММ.РРРР - ДД.ММ.РРРР`\n\n"
+            "Наприклад: `01.12.2025 - 31.12.2025`",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        return
+    else:
+        await update.message.reply_text("⚠️ Оберіть період з меню.")
+        return
+    
+    # Генеруємо Excel
+    await export_to_excel_with_period(update, context, date_from, date_to, period_name)
+
+async def handle_export_custom_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введеного періоду"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        await show_export_period_menu(update, context)
+        return
+    
+    try:
+        import re
+        match = re.match(r'(\d{2}\.\d{2}\.\d{4})\s*-\s*(\d{2}\.\d{2}\.\d{4})', text)
+        
+        if not match:
+            await update.message.reply_text(
+                "⚠️ Невірний формат!\n\n"
+                "Використовуйте: `ДД.ММ.РРРР - ДД.ММ.РРРР`\n"
+                "Наприклад: `01.12.2025 - 31.12.2025`",
+                parse_mode="Markdown"
+            )
+            return
+        
+        date_from = match.group(1)
+        date_to = match.group(2)
+        
+        # Перевіряємо валідність дат
+        from datetime import datetime
+        try:
+            datetime.strptime(date_from, "%d.%m.%Y")
+            datetime.strptime(date_to, "%d.%m.%Y")
+        except ValueError:
+            await update.message.reply_text("⚠️ Невірна дата! Перевірте формат.")
+            return
+        
+        period_name = f"{date_from} - {date_to}"
+        
+        # Генеруємо Excel
+        await export_to_excel_with_period(update, context, date_from, date_to, period_name)
+        
+    except Exception as e:
+        logger.error(f"Error in handle_export_custom_period: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка обробки періоду.")
+
+async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFAULT_TYPE, date_from: str, date_to: str, period_name: str):
+    """Експорт даних в Excel за період"""
+    user_id = update.message.from_user.id
+    
+    try:
+        await update.message.reply_text("⏳ Генерую Excel файл... Зачекайте...")
+        
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from io import BytesIO
+        
+        # Створюємо Excel workbook
+        wb = Workbook()
+        
+        # ============ ЛИСТ 1: УРОКИ ============
+        ws1 = wb.active
+        ws1.title = "Уроки"
+        
+        headers1 = ["ID", "Дата", "Час", "Інструктор", "Учень", "Телефон", "Тариф", "Тривалість", "Вартість", "Статус", "Оцінка учня", "Коментар"]
+        ws1.append(headers1)
+        
+        # Стилізація
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        
+        for cell in ws1[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Дані уроків З ФІЛЬТРОМ ПО ДАТАХ
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    l.id,
+                    l.date,
+                    l.time,
+                    i.name as instructor_name,
+                    s.name as student_name,
+                    s.phone as student_phone,
+                    s.tariff,
+                    l.duration,
+                    CASE 
+                        WHEN l.duration LIKE '%2%' THEN s.tariff * 2
+                        WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
+                        ELSE s.tariff * 1
+                    END as earnings,
+                    l.status,
+                    l.rating,
+                    l.feedback
+                FROM lessons l
+                LEFT JOIN instructors i ON l.instructor_id = i.id
+                LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
+                WHERE l.date BETWEEN ? AND ?
+                ORDER BY l.date DESC, l.time DESC
+            """, (date_from, date_to))
+            
+            lessons = cursor.fetchall()
+            
+            # Статистика для повідомлення
+            total_lessons = len(lessons)
+            total_earnings = 0
+            unique_students = set()
+            
+            for lesson in lessons:
+                ws1.append(lesson)
+                if lesson[8]:  # earnings
+                    total_earnings += lesson[8]
+                if lesson[4]:  # student_name
+                    unique_students.add(lesson[4])
+        
+        # Автоширина
+        for column in ws1.columns:
+            max_length = 0
+            column = [cell for cell in column]
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws1.column_dimensions[column[0].column_letter].width = adjusted_width
+        
+        # ============ ЛИСТ 2: УЧНІ ============
+        ws2 = wb.create_sheet(title="Учні")
+        
+        headers2 = ["Учень", "Телефон", "Тариф", "Уроків", "Годин", "Витрачено"]
+        ws2.append(headers2)
+        
+        for cell in ws2[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Дані учнів З ФІЛЬТРОМ ПО ДАТАХ
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    s.name,
+                    s.phone,
+                    s.tariff,
+                    COUNT(l.id) as total_lessons,
+                    SUM(
+                        CASE 
+                            WHEN l.duration LIKE '%2%' THEN 2
+                            WHEN l.duration LIKE '%1.5%' THEN 1.5
+                            ELSE 1
+                        END
+                    ) as total_hours,
+                    SUM(
+                        CASE 
+                            WHEN l.duration LIKE '%2%' THEN s.tariff * 2
+                            WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
+                            ELSE s.tariff * 1
+                        END
+                    ) as total_spent
+                FROM students s
+                LEFT JOIN lessons l ON s.telegram_id = l.student_telegram_id 
+                    AND l.date BETWEEN ? AND ?
+                    AND l.status IN ('active', 'completed')
+                GROUP BY s.id
+                HAVING total_lessons > 0
+                ORDER BY total_lessons DESC
+            """, (date_from, date_to))
+            
+            students = cursor.fetchall()
+            
+            for student in students:
+                ws2.append(student)
+        
+        # Автоширина
+        for column in ws2.columns:
+            max_length = 0
+            column = [cell for cell in column]
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws2.column_dimensions[column[0].column_letter].width = adjusted_width
+        
+        # ============ ЛИСТ 3: ІНСТРУКТОРИ ============
+        ws3 = wb.create_sheet(title="Інструктори")
+        
+        headers3 = ["Інструктор", "Тариф", "Уроків", "Годин", "Заробіток", "Рейтинг"]
+        ws3.append(headers3)
+        
+        for cell in ws3[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Дані інструкторів З ФІЛЬТРОМ ПО ДАТАХ
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    i.name,
+                    i.price_per_hour,
+                    COUNT(l.id) as total_lessons,
+                    SUM(
+                        CASE 
+                            WHEN l.duration LIKE '%2%' THEN 2
+                            WHEN l.duration LIKE '%1.5%' THEN 1.5
+                            ELSE 1
+                        END
+                    ) as total_hours,
+                    SUM(
+                        CASE 
+                            WHEN l.duration LIKE '%2%' THEN s.tariff * 2
+                            WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
+                            ELSE s.tariff * 1
+                        END
+                    ) as total_earnings,
+                    COALESCE(AVG(CASE WHEN l.rating > 0 THEN l.rating END), 0) as avg_rating
+                FROM instructors i
+                LEFT JOIN lessons l ON i.id = l.instructor_id 
+                    AND l.date BETWEEN ? AND ?
+                    AND l.status = 'completed'
+                LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
+                GROUP BY i.id
+                HAVING total_lessons > 0
+                ORDER BY total_lessons DESC
+            """, (date_from, date_to))
+            
+            instructors = cursor.fetchall()
+            
+            for instructor in instructors:
+                row = list(instructor)
+                # Форматуємо рейтинг
+                if len(row) > 5 and row[5]:
+                    row[5] = round(row[5], 1)
+                ws3.append(row)
+        
+        # Автоширина
+        for column in ws3.columns:
+            max_length = 0
+            column = [cell for cell in column]
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws3.column_dimensions[column[0].column_letter].width = adjusted_width
+        
+        # ============ ЗБЕРІГАЄМО ФАЙЛ ============
+        excel_file = BytesIO()
+        wb.save(excel_file)
+        excel_file.seek(0)
+        
+        # Назва файлу
+        filename = f"export_{period_name.replace(' ', '_').replace(':', '-')}.xlsx"
+        
+        # Відправляємо файл
+        await context.bot.send_document(
+            chat_id=update.message.chat_id,
+            document=excel_file,
+            filename=filename,
+            caption=f"📊 *Експорт завершено!*\n\n"
+                   f"📅 Період: {period_name}\n"
+                   f"📝 Уроків: {total_lessons}\n"
+                   f"👥 Учнів: {len(unique_students)}\n"
+                   f"💰 Загальний заробіток: {total_earnings:.0f} грн",
+            parse_mode="Markdown"
+        )
+        
+        logger.info(f"✅ Excel exported for period: {period_name}")
+        
+        # Повертаємось в меню адміна
+        await show_admin_panel(update, context)
+        
+    except Exception as e:
+        logger.error(f"Error in export_to_excel_with_period: {e}", exc_info=True)
+        await update.message.reply_text(
+            "❌ Помилка експорту.\n\n"
+            f"Деталі: {str(e)}"
+        )
+        await show_admin_panel(update, context)
+
+# ======================= EXPORT TO EXCEL (OLD - DEPRECATED) =======================
 async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Експорт всіх даних в Excel"""
     user_id = update.message.from_user.id
