@@ -3090,9 +3090,9 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             for instructor in instructors:
                 row = list(instructor)
-                # Форматуємо рейтинг
-                if row[6]:
-                    row[6] = round(row[6], 1)
+                # Форматуємо рейтинг (тепер це індекс 5, не 6!)
+                if len(row) > 5 and row[5]:
+                    row[5] = round(row[5], 1)
                 ws3.append(row)
         
         # Автоширина
