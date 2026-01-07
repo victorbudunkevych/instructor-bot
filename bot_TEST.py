@@ -89,7 +89,7 @@ TZ = pytz.timezone(TIMEZONE)
 def ensure_instructors_exist():
     """Автоматично додає інструкторів якщо їх немає в базі"""
     instructors = [
-        (280240917, 'Шепшелей Владислав', '+380673441441', 'Автомат', 490),
+        (662748304, 'Гошовська Інна', '+380000000000', 'Автомат', 490),
         (666619757, 'Фірсов Артур', '+380000000000', 'Механіка', 550),
         (982534001, 'Будункевич Мирослав', '+380000000000', 'Механіка', 550),
         (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 490),
@@ -1421,7 +1421,7 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         instructor_id = instructor_data[0]
         
-        # Отримуємо завершені заняття без оцінки ІНСТРУКТОРА
+        # Отримуємо завершені заняття без оцінки інструктора
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -1429,7 +1429,7 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 FROM lessons
                 WHERE instructor_id = ? 
                   AND status = 'completed'
-                  AND instructor_rating IS NULL
+                  AND rating IS NULL
                 ORDER BY date DESC, time DESC
                 LIMIT 10
             """, (instructor_id,))
@@ -2038,7 +2038,8 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text
     
     if text == "🔙 Назад":
-        await show_admin_panel(update, context)
+        context.user_data.clear()  # Очищаємо стан
+        await start(update, context)  # Повертаємось в головне меню
         return
     
     if text == "📊 Звіт по інструкторах":
