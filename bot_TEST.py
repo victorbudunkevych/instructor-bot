@@ -89,7 +89,7 @@ TZ = pytz.timezone(TIMEZONE)
 def ensure_instructors_exist():
     """Автоматично додає інструкторів якщо їх немає в базі"""
     instructors = [
-        (662748304, 'Гошовська Інна', '+380000000000', 'Автомат', 490),
+        (280240917, 'Шепшелей Владислав', '+380673441441', 'Автомат', 490),
         (666619757, 'Фірсов Артур', '+380000000000', 'Механіка', 550),
         (982534001, 'Будункевич Мирослав', '+380000000000', 'Механіка', 550),
         (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 490),
@@ -1421,7 +1421,7 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         instructor_id = instructor_data[0]
         
-        # Отримуємо завершені заняття без оцінки
+        # Отримуємо завершені заняття без оцінки ІНСТРУКТОРА
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -1429,7 +1429,7 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 FROM lessons
                 WHERE instructor_id = ? 
                   AND status = 'completed'
-                  AND rating IS NULL
+                  AND instructor_rating IS NULL
                 ORDER BY date DESC, time DESC
                 LIMIT 10
             """, (instructor_id,))
@@ -3066,7 +3066,7 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
         ws1 = wb.active
         ws1.title = "Уроки"
         
-        headers1 = ["ID", "Дата", "Час", "Інструктор", "Учень", "Телефон", "Тариф", "Тривалість", "Вартість", "Статус", "Оцінка учня", "Коментар"]
+        headers1 = ["ID", "Дата", "Час", "Інструктор", "Учень", "Телефон", "Тариф", "Тривалість", "Вартість", "Статус", "⭐ Оцінка учня", "💬 Коментар учня", "⭐ Оцінка інструктора", "💬 Коментар інструктора"]
         ws1.append(headers1)
         
         # Стилізація
@@ -3098,7 +3098,9 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                     END as earnings,
                     l.status,
                     l.rating,
-                    l.feedback
+                    l.feedback,
+                    l.instructor_rating,
+                    l.instructor_feedback
                 FROM lessons l
                 LEFT JOIN instructors i ON l.instructor_id = i.id
                 LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
@@ -3180,7 +3182,7 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
         # ============ ЛИСТ 2: УЧНІ ============
         ws2 = wb.create_sheet(title="Учні")
         
-        headers2 = ["Учень", "Телефон", "Тариф", "Уроків", "Годин", "Витрачено"]
+        headers2 = ["Учень", "Телефон", "Тариф", "Уроків", "Годин", "Витрачено", "⭐ Середній рейтинг"]
         ws2.append(headers2)
         
         for cell in ws2[1]:
@@ -3198,6 +3200,7 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             student_tariff = lesson[6]  # s.tariff
             duration = lesson[7]  # l.duration
             earnings = lesson[8]  # earnings
+            instructor_rating = lesson[12]  # l.instructor_rating (НОВЕ!)
             
             if not student_name or not student_tariff:
                 continue
@@ -3208,7 +3211,8 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                     'tariff': student_tariff,
                     'lessons': 0,
                     'hours': 0,
-                    'spent': 0
+                    'spent': 0,
+                    'ratings': []  # НОВЕ: список оцінок
                 }
             
             students_stats[student_name]['lessons'] += 1
@@ -3224,17 +3228,27 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             # Рахуємо витрати
             if earnings:
                 students_stats[student_name]['spent'] += earnings
+            
+            # Збираємо оцінки (НОВЕ!)
+            if instructor_rating and instructor_rating > 0:
+                students_stats[student_name]['ratings'].append(instructor_rating)
         
         # Конвертуємо в список для Excel
         students = []
         for name, stats in sorted(students_stats.items(), key=lambda x: x[1]['lessons'], reverse=True):
+            # Рахуємо середній рейтинг
+            avg_rating = sum(stats['ratings']) / len(stats['ratings']) if stats['ratings'] else None
+            if avg_rating:
+                avg_rating = round(avg_rating, 1)
+            
             students.append((
                 name,
                 stats['phone'],
                 stats['tariff'],
                 stats['lessons'],
                 stats['hours'],
-                stats['spent']
+                stats['spent'],
+                avg_rating if avg_rating else '-'  # НОВЕ: рейтинг
             ))
         
         for student in students:
