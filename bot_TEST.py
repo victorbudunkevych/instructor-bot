@@ -2973,17 +2973,18 @@ async def handle_export_period_choice(update: Update, context: ContextTypes.DEFA
     
     if text == "📊 За тиждень":
         date_from = (today - timedelta(days=7)).strftime("%d.%m.%Y")
-        date_to = today.strftime("%d.%m.%Y")
+        date_to = (today + timedelta(days=7)).strftime("%d.%m.%Y")  # +7 днів вперед
         period_name = "тиждень"
         
     elif text == "📊 За місяць":
         date_from = (today - timedelta(days=30)).strftime("%d.%m.%Y")
-        date_to = today.strftime("%d.%m.%Y")
+        date_to = (today + timedelta(days=30)).strftime("%d.%m.%Y")  # +30 днів вперед
         period_name = "місяць"
         
     elif text == "📊 За весь час":
         date_from = "01.01.2020"
-        date_to = today.strftime("%d.%m.%Y")
+        # Додаємо +1 рік щоб захопити майбутні уроки
+        date_to = (today + timedelta(days=365)).strftime("%d.%m.%Y")
         period_name = "весь час"
         
     elif text == "📊 Свій період":
