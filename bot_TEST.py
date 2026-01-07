@@ -3081,31 +3081,70 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
         # Дані уроків - ОТРИМУЄМО ВСІ, ФІЛЬТРУЄМО В PYTHON
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT 
-                    l.id,
-                    l.date,
-                    l.time,
-                    i.name as instructor_name,
-                    s.name as student_name,
-                    s.phone as student_phone,
-                    s.tariff,
-                    l.duration,
-                    CASE 
-                        WHEN l.duration LIKE '%2%' THEN s.tariff * 2
-                        WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
-                        ELSE s.tariff * 1
-                    END as earnings,
-                    l.status,
-                    l.rating,
-                    l.feedback,
-                    l.instructor_rating,
-                    l.instructor_feedback
-                FROM lessons l
-                LEFT JOIN instructors i ON l.instructor_id = i.id
-                LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
-                ORDER BY l.date DESC, l.time DESC
-            """)
+            
+            # Перевіряємо чи є нові колонки в БД
+            cursor.execute("PRAGMA table_info(lessons)")
+            columns = {row[1] for row in cursor.fetchall()}
+            has_instructor_rating = 'instructor_rating' in columns
+            has_instructor_feedback = 'instructor_feedback' in columns
+            
+            logger.info(f"🔍 Колонки БД: instructor_rating={has_instructor_rating}, instructor_feedback={has_instructor_feedback}")
+            
+            # SQL запит залежно від наявності колонок
+            if has_instructor_rating and has_instructor_feedback:
+                # Нова БД з колонками
+                cursor.execute("""
+                    SELECT 
+                        l.id,
+                        l.date,
+                        l.time,
+                        i.name as instructor_name,
+                        s.name as student_name,
+                        s.phone as student_phone,
+                        s.tariff,
+                        l.duration,
+                        CASE 
+                            WHEN l.duration LIKE '%2%' THEN s.tariff * 2
+                            WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
+                            ELSE s.tariff * 1
+                        END as earnings,
+                        l.status,
+                        l.rating,
+                        l.feedback,
+                        l.instructor_rating,
+                        l.instructor_feedback
+                    FROM lessons l
+                    LEFT JOIN instructors i ON l.instructor_id = i.id
+                    LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
+                    ORDER BY l.date DESC, l.time DESC
+                """)
+            else:
+                # Стара БД без нових колонок - додаємо NULL
+                cursor.execute("""
+                    SELECT 
+                        l.id,
+                        l.date,
+                        l.time,
+                        i.name as instructor_name,
+                        s.name as student_name,
+                        s.phone as student_phone,
+                        s.tariff,
+                        l.duration,
+                        CASE 
+                            WHEN l.duration LIKE '%2%' THEN s.tariff * 2
+                            WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
+                            ELSE s.tariff * 1
+                        END as earnings,
+                        l.status,
+                        l.rating,
+                        l.feedback,
+                        NULL as instructor_rating,
+                        NULL as instructor_feedback
+                    FROM lessons l
+                    LEFT JOIN instructors i ON l.instructor_id = i.id
+                    LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
+                    ORDER BY l.date DESC, l.time DESC
+                """)
             
             all_lessons = cursor.fetchall()
         
