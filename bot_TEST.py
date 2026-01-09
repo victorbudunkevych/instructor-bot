@@ -1,4 +1,5 @@
-# bot_TEST.py - ТЕСТОВА ВЕРСІЯ З ОКРЕМОЮ БД
+# bot_TEST.py - ВЕРСІЯ 17 З ВИПРАВЛЕННЯМ ОЦІНЮВАННЯ УЧНЯ
+# ВИПРАВЛЕННЯ: rate_student_menu тепер показує всі completed уроки з оцінками - ТЕСТОВА ВЕРСІЯ З ОКРЕМОЮ БД
 import sqlite3
 import re
 import logging
@@ -1410,7 +1411,7 @@ async def show_cancellation_history(update: Update, context: ContextTypes.DEFAUL
 
 # ======================= RATING FUNCTIONS =======================
 async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Меню оцінювання учнів"""
+    """Меню оцінювання учнів - ВИПРАВЛЕНА ВЕРСІЯ v17"""
     user_id = update.message.from_user.id
     
     try:
@@ -1421,15 +1422,14 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         instructor_id = instructor_data[0]
         
-        # Отримуємо завершені заняття без оцінки інструктора
+        # ✅ ВИПРАВЛЕНО: Прибрано AND rating IS NULL, додано rating, feedback
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, date, time, student_name
+                SELECT id, date, time, student_name, rating, feedback
                 FROM lessons
                 WHERE instructor_id = ? 
                   AND status = 'completed'
-                  AND rating IS NULL
                 ORDER BY date DESC, time DESC
                 LIMIT 10
             """, (instructor_id,))
@@ -1444,11 +1444,27 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["lessons_to_rate"] = lessons
         context.user_data["state"] = "rating_select_lesson"
         
-        text = "⭐ *Оберіть заняття для оцінювання:*\n\n"
+        text = "⭐ *Оберіть заняття для оцінювання:*
+
+"
         keyboard = []
         
-        for i, (lesson_id, date, time, student_name) in enumerate(lessons, 1):
-            text += f"{i}. {date} {time} - {student_name}\n"
+        # ✅ ВИПРАВЛЕНО: Показуємо оцінку учня
+        for i, (lesson_id, date, time, student_name, rating, feedback) in enumerate(lessons, 1):
+            text += f"{i}. {date} {time} - {student_name}
+"
+            
+            # Показуємо оцінку учня якщо є
+            if rating and rating > 0:
+                stars = "⭐" * rating
+                text += f"   Учень оцінив: {stars} ({rating}/5)
+"
+                if feedback:
+                    text += f"   💬 \"{feedback}\"
+"
+            
+            text += "
+"
             keyboard.append([KeyboardButton(f"{i}")])
         
         keyboard.append([KeyboardButton("🔙 Назад")])
@@ -1462,6 +1478,7 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Error in rate_student_menu: {e}", exc_info=True)
         await update.message.reply_text("❌ Помилка.")
+
 
 async def handle_rating_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обробка процесу оцінювання"""
