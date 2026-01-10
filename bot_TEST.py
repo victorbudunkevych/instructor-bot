@@ -1452,27 +1452,21 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["lessons_to_rate"] = lessons
         context.user_data["state"] = "rating_select_lesson"
         
-        text = "⭐ *Оберіть заняття для оцінювання:*
-
-"
+        text = "⭐ *Оберіть заняття для оцінювання:*\n\n"
         keyboard = []
         
         # ✅ ВИПРАВЛЕНО: Показуємо оцінку учня
         for i, (lesson_id, date, time, student_name, rating, feedback) in enumerate(lessons, 1):
-            text += f"{i}. {date} {time} - {student_name}
-"
+            text += f"{i}. {date} {time} - {student_name}\n"
             
             # Показуємо оцінку учня якщо є
             if rating and rating > 0:
                 stars = "⭐" * rating
-                text += f"   Учень оцінив: {stars} ({rating}/5)
-"
+                text += f"   Учень оцінив: {stars} ({rating}/5)\n"
                 if feedback:
-                    text += f"   💬 \"{feedback}\"
-"
+                    text += f"   💬 \"{feedback}\"\n"
             
-            text += "
-"
+            text += "\n"
             keyboard.append([KeyboardButton(f"{i}")])
         
         keyboard.append([KeyboardButton("🔙 Назад")])
