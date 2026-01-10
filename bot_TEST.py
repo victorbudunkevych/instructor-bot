@@ -1,4 +1,4 @@
-# bot_TEST.py - ВЕРСІЯ 17 З ВИПРАВЛЕННЯМ ОЦІНЮВАННЯ УЧНЯ
+# bot_TEST.py - ВЕРСІЯ 20 З РОЗДІЛЬНИМИ ОЦІНКАМИ + ЗАБЛОКОВАНІ ЧАСИ + ВИДІЛЕННЯ ВИХІДНИХ
 # ВИПРАВЛЕННЯ: rate_student_menu тепер показує всі completed уроки з оцінками - ТЕСТОВА ВЕРСІЯ З ОКРЕМОЮ БД
 import sqlite3
 import re
@@ -137,6 +137,14 @@ def get_next_dates(days=14, instructor_name=None):
         # Форматуємо дату: "Пн 13.12.2024"
         weekday = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"][date.weekday()]
         
+        # ✅ ДОДАНО: Виділення вихідних кольоровими блоками
+        if date.weekday() == 5:  # Субота
+            weekday_display = f"🟦 {weekday}"
+        elif date.weekday() == 6:  # Неділя
+            weekday_display = f"🟥 {weekday}"
+        else:
+            weekday_display = weekday
+        
         # Якщо передано інструктора - рахуємо вільні години
         if instructor_name:
             free_slots = get_available_time_slots(instructor_name, date_formatted)
@@ -144,11 +152,11 @@ def get_next_dates(days=14, instructor_name=None):
             
             # Показуємо тільки дні з вільними годинами
             if free_count > 0:
-                formatted = f"{weekday} {date.strftime('%d.%m')} ({free_count})"
+                formatted = f"{weekday_display} {date.strftime('%d.%m')} ({free_count})"
                 dates.append(formatted)
         else:
             # Без інструктора - просто дата
-            formatted = f"{weekday} {date.strftime('%d.%m.%Y')}"
+            formatted = f"{weekday_display} {date.strftime('%d.%m.%Y')}"
             dates.append(formatted)
     
     return dates
@@ -1548,7 +1556,7 @@ async def handle_rating_flow(update: Update, context: ContextTypes.DEFAULT_TYPE)
         rating = context.user_data.get("rating_score")
         student_name = context.user_data.get("rating_student_name")
         
-        if add_lesson_rating(lesson_id, rating, feedback):
+        if add_instructor_rating(lesson_id, rating, feedback):
             await update.message.reply_text(
                 f"✅ Оцінку додано!\n\n"
                 f"👤 {student_name}\n"
@@ -3430,6 +3438,89 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                     pass
             adjusted_width = min(max_length + 2, 50)
             ws3.column_dimensions[column[0].column_letter].width = adjusted_width
+        
+
+        # ============ ЛИСТ 4: ЗАБЛОКОВАНІ ЧАСИ ============
+        ws4 = wb.create_sheet(title="Заблоковані часи")
+        
+        headers4 = ["Інструктор", "Дата", "Час початку", "Час кінця", "Причина", "Створено"]
+        ws4.append(headers4)
+        
+        for cell in ws4[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Отримуємо заблоковані часи
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    i.name AS instructor_name,
+                    sb.date,
+                    sb.time_start,
+                    sb.time_end,
+                    sb.reason,
+                    sb.created_at
+                FROM schedule_blocks sb
+                JOIN instructors i ON sb.instructor_id = i.id
+                WHERE sb.is_active = 1
+                ORDER BY sb.date DESC, sb.time_start
+            """)
+            blocked_times = cursor.fetchall()
+        
+        if blocked_times:
+            for block in blocked_times:
+                instructor_name = block[0]
+                date = block[1]  # YYYY-MM-DD
+                time_start = block[2]
+                time_end = block[3]
+                reason = block[4] or "Не вказано"
+                created_at = block[5]
+                
+                # Форматуємо дату в DD.MM.YYYY
+                try:
+                    date_obj = datetime.strptime(date, "%Y-%m-%d")
+                    date_formatted = date_obj.strftime("%d.%m.%Y")
+                    weekday = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"][date_obj.weekday()]
+                    date_display = f"{weekday} {date_formatted}"
+                except:
+                    date_display = date
+                
+                # Форматуємо час
+                time_display = f"{time_start} - {time_end}"
+                
+                # Форматуємо created_at
+                try:
+                    created_obj = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+                    created_display = created_obj.strftime("%d.%m.%Y %H:%M")
+                except:
+                    created_display = created_at
+                
+                ws4.append([
+                    instructor_name,
+                    date_display,
+                    time_start,
+                    time_end,
+                    reason,
+                    created_display
+                ])
+        else:
+            # Якщо немає заблокованих часів
+            ws4.append(["Немає заблокованих часів", "", "", "", "", ""])
+        
+        # Автоширина
+        for column in ws4.columns:
+            max_length = 0
+            column = [cell for cell in column]
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws4.column_dimensions[column[0].column_letter].width = adjusted_width
         
         # ============ ЗБЕРІГАЄМО ФАЙЛ ============
         excel_file = BytesIO()
