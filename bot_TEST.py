@@ -58,6 +58,23 @@ from database import (
     add_lesson_rating
 )
 
+# ======================= HELPER FUNCTIONS =======================
+def add_instructor_rating(lesson_id, rating, feedback=""):
+    """Додати оцінку та коментар інструктора для учня"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE lessons
+                SET instructor_rating = ?, instructor_feedback = ?
+                WHERE id = ?
+            """, (rating, feedback, lesson_id))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error in add_instructor_rating: {e}", exc_info=True)
+        return False
+
 # Перевизначаємо get_db для тестової БД
 @contextmanager
 def get_db():
@@ -1437,7 +1454,7 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         instructor_id = instructor_data[0]
         
-        # ✅ ВИПРАВЛЕНО: Прибрано AND rating IS NULL, додано rating, feedback
+        # Отримуємо завершені заняття БЕЗ оцінки ІНСТРУКТОРА
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -1445,6 +1462,7 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 FROM lessons
                 WHERE instructor_id = ? 
                   AND status = 'completed'
+                  AND instructor_rating IS NULL
                 ORDER BY date DESC, time DESC
                 LIMIT 10
             """, (instructor_id,))
@@ -1462,7 +1480,7 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "⭐ *Оберіть заняття для оцінювання:*\n\n"
         keyboard = []
         
-        # ✅ ВИПРАВЛЕНО: Показуємо оцінку учня
+        # Показуємо оцінку УЧНЯ якщо є
         for i, (lesson_id, date, time, student_name, rating, feedback) in enumerate(lessons, 1):
             text += f"{i}. {date} {time} - {student_name}\n"
             
