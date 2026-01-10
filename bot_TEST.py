@@ -3471,7 +3471,6 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                     sb.created_at
                 FROM schedule_blocks sb
                 JOIN instructors i ON sb.instructor_id = i.id
-                WHERE sb.is_active = 1
                 ORDER BY sb.date DESC, sb.time_start
             """)
             blocked_times = cursor.fetchall()
