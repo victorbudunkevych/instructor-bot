@@ -859,20 +859,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Витягуємо дату з формату "Пн 13.12 (3)" або "Пн 13.12.2024"
+            # Витягуємо дату з формату "Пн 13.12 (3)", "🟦 Сб 13.12 (3)" або "Пн 13.12.2024"
             date_parts = text.split()
-            if len(date_parts) >= 2:
-                # Можливо формат: "Пн 13.12 (3)" або "Пн 13.12.2024"
+            
+            # Перевіряємо чи є емодзі на початку (🟦 або 🟥)
+            if len(date_parts) >= 3 and date_parts[0] in ["🟦", "🟥"]:
+                # Формат: "🟦 Сб 10.01 (5)" → беремо date_parts[2]
+                date_candidate = date_parts[2].replace("(", "").replace(")", "")  # "10.01"
+            elif len(date_parts) >= 2:
+                # Формат: "Пн 13.12 (3)" або "Пн 13.12.2024" → беремо date_parts[1]
                 date_candidate = date_parts[1]  # "13.12" або "13.12.2024"
-                
+            else:
+                date_str = text  # Якщо ввели вручну "13.12.2024"
+                date_candidate = None
+            
+            if date_candidate:
                 # Якщо короткий формат "13.12" - додаємо рік
                 if date_candidate.count('.') == 1:
                     current_year = datetime.now().year
                     date_str = f"{date_candidate}.{current_year}"
                 else:
                     date_str = date_candidate
-            else:
-                date_str = text  # Якщо ввели вручну "13.12.2024"
             
             logger.info(f"📆 Витягнута дата: {date_str}")
             
@@ -1742,9 +1749,15 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
     # Тепер обробка станів
     logger.info(f"📍 Перевірка стану: {state}")
     if state == "block_choose_date":
-        # Витягуємо дату з формату "Пн 13.12.2024"
+        # Витягуємо дату з формату "Пн 13.12.2024", "🟦 Сб 13.12.2024" тощо
         date_parts = text.split()
-        if len(date_parts) == 2:
+        
+        # Перевіряємо чи є емодзі на початку (🟦 або 🟥)
+        if len(date_parts) >= 3 and date_parts[0] in ["🟦", "🟥"]:
+            # Формат: "🟦 Сб 10.01.2024" → беремо date_parts[2]
+            date_str = date_parts[2]
+        elif len(date_parts) >= 2:
+            # Формат: "Пн 13.12.2024" → беремо date_parts[1]
             date_str = date_parts[1]  # "13.12.2024"
         else:
             date_str = text  # Якщо ввели вручну
