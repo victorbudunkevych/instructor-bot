@@ -25,6 +25,8 @@ from openpyxl.styles import Font, Alignment, PatternFill
 # ТЕСТОВИЙ БОТ TOKEN
 TOKEN = "8337801301:AAGXhZVzyoqjED_taA2qqgtaxg8eGeFqiWQ"
 ADMIN_ID = 669706811  # Твій Telegram ID
+ADMIN_ID = 884453802
+ADMIN_ID = 648021272
 TIMEZONE = "Europe/Kyiv"
 # ОКРЕМА ТЕСТОВА БАЗА ДАНИХ
 DB_NAME = "driving_school.db"
