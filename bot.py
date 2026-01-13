@@ -1,4 +1,4 @@
-# bot_TEST.py - ВЕРСІЯ 20 З РОЗДІЛЬНИМИ ОЦІНКАМИ + ЗАБЛОКОВАНІ ЧАСИ + ВИДІЛЕННЯ ВИХІДНИХ
+# bot.py - ВЕРСІЯ 20 PRODUCTION
 # ВИПРАВЛЕННЯ: rate_student_menu тепер показує всі completed уроки з оцінками - ТЕСТОВА ВЕРСІЯ З ОКРЕМОЮ БД
 import sqlite3
 import re
@@ -23,11 +23,11 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 # ==================== ТЕСТОВА КОНФІГУРАЦІЯ ====================
 # ТЕСТОВИЙ БОТ TOKEN
-TOKEN = "8215653253:AAHbqzHTw4mhkQOHs18eGIqUn1ovavbrPeg"
+TOKEN = "8337801301:AAGXhZVzyoqjED_taA2qqgtaxg8eGeFqiWQ"
 ADMIN_ID = 669706811  # Твій Telegram ID
 TIMEZONE = "Europe/Kyiv"
 # ОКРЕМА ТЕСТОВА БАЗА ДАНИХ
-DB_NAME = "driving_school_TEST.db"
+DB_NAME = "driving_school.db"
 # ==============================================================
 
 # Робочі години
