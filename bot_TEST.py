@@ -23,7 +23,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 # ==================== ТЕСТОВА КОНФІГУРАЦІЯ ====================
 # ТЕСТОВИЙ БОТ TOKEN
-TOKEN = "8215653253:AAHbqzHTw4mhkQOHs18eGIqUn1ovavbrPeg"
+TOKEN = "8320903421:AAFCQaK3Dc5QGlSit3Ddsb6HyFN35LEnBzg"
 ADMIN_ID = 669706811  # Твій Telegram ID
 TIMEZONE = "Europe/Kyiv"
 # ОКРЕМА ТЕСТОВА БАЗА ДАНИХ
