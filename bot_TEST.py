@@ -23,7 +23,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 # ==================== ТЕСТОВА КОНФІГУРАЦІЯ ====================
 # ТЕСТОВИЙ БОТ TOKEN
-TOKEN = "8320903421:AAFCQaK3Dc5QGlSit3Ddsb6HyFN35LEnBzg"
+TOKEN = "8215653253:AAHbqzHTw4mhkQOHs18eGIqUn1ovavbrPeg"
 ADMIN_ID = 669706811  # Твій Telegram ID
 TIMEZONE = "Europe/Kyiv"
 # ОКРЕМА ТЕСТОВА БАЗА ДАНИХ
@@ -74,37 +74,6 @@ def add_instructor_rating(lesson_id, rating, feedback=""):
     except Exception as e:
         logger.error(f"Error in add_instructor_rating: {e}", exc_info=True)
         return False
-
-def get_student_by_phone(phone):
-    """Отримати учня за номером телефону"""
-    try:
-        # Очищаємо номер від пробілів, дефісів, дужок
-        clean_phone = re.sub(r'[\s\-\(\)]', '', phone)
-        
-        with get_db() as conn:
-            cursor = conn.cursor()
-            # Шукаємо по очищеному номеру
-            cursor.execute("""
-                SELECT telegram_id, name, phone, tariff
-                FROM students
-                WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', '') LIKE ?
-                   OR REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', '') LIKE ?
-            """, (f"%{clean_phone[-9:]}", f"%{clean_phone}%"))
-            
-            result = cursor.fetchone()
-            
-            if result:
-                return {
-                    'telegram_id': result[0],
-                    'name': result[1],
-                    'phone': result[2],
-                    'tariff': result[3]
-                }
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error in get_student_by_phone: {e}", exc_info=True)
-        return None
 
 # Перевизначаємо get_db для тестової БД
 @contextmanager
@@ -463,99 +432,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"📥 Message: '{text}' | State: '{state}'")
     
     try:
-        # === АДМІН: ЗАПИС УЧНЯ ===
-        if state == "admin_booking_phone":
-            if text == "🔙 Назад":
-                context.user_data["state"] = "waiting_for_duration"
-                keyboard = [
-                    [KeyboardButton("1 година")],
-                    [KeyboardButton("2 години")],
-                    [KeyboardButton("🔙 Назад")]
-                ]
-                await update.message.reply_text(
-                    "⏱ Оберіть тривалість заняття:",
-                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-                )
-                return
-            
-            # Перевіряємо валідність телефону
-            if not validate_phone(text):
-                await update.message.reply_text("⚠️ Невірний формат номера. Спробуйте ще раз:")
-                return
-            
-            phone = text
-            
-            # Шукаємо учня в базі за телефоном
-            student_data = get_student_by_phone(phone)
-            
-            if student_data:
-                # Учень знайдений - беремо дані з бази
-                context.user_data["student_name"] = student_data['name']
-                context.user_data["student_phone"] = student_data['phone']
-                context.user_data["student_tariff"] = student_data['tariff']
-                context.user_data["student_telegram_id"] = student_data.get('telegram_id', 0)
-                
-                await update.message.reply_text(
-                    f"✅ Учень знайдений в базі!\n\n"
-                    f"👤 Ім'я: {student_data['name']}\n"
-                    f"💰 Тариф: {student_data['tariff']} грн/год"
-                )
-                
-                # Показуємо підтвердження
-                await show_booking_confirmation(update, context)
-            else:
-                # Учня немає - запитуємо ім'я
-                context.user_data["student_phone"] = phone
-                context.user_data["state"] = "admin_booking_name"
-                
-                keyboard = [[KeyboardButton("🔙 Назад")]]
-                
-                await update.message.reply_text(
-                    "📝 Учня не знайдено в базі.\n\n"
-                    "Введіть ім'я та прізвище учня:",
-                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-                )
-            return
-        
-        if state == "admin_booking_name":
-            if text == "🔙 Назад":
-                context.user_data["state"] = "admin_booking_phone"
-                await update.message.reply_text("📱 Введіть номер телефону учня:")
-                return
-            
-            context.user_data["student_name"] = text
-            context.user_data["state"] = "admin_booking_tariff"
-            
-            keyboard = [
-                [KeyboardButton("490 грн")],
-                [KeyboardButton("550 грн")],
-                [KeyboardButton("🔙 Назад")]
-            ]
-            
-            await update.message.reply_text(
-                "💰 Оберіть тариф для учня:",
-                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-            )
-            return
-        
-        if state == "admin_booking_tariff":
-            if text == "🔙 Назад":
-                context.user_data["state"] = "admin_booking_name"
-                await update.message.reply_text("📝 Введіть ім'я та прізвище учня:")
-                return
-            
-            if text not in ["490 грн", "550 грн"]:
-                await update.message.reply_text("⚠️ Оберіть тариф з меню.")
-                return
-            
-            tariff = int(text.split()[0])
-            context.user_data["student_tariff"] = tariff
-            context.user_data["student_telegram_id"] = 0  # Для адмін-записів
-            
-            # Показуємо підтвердження
-            await show_booking_confirmation(update, context)
-            return
-        
         # === ОЦІНЮВАННЯ ІНСТРУКТОРА УЧНЕМ ===
         # Крок 1: Отримання оцінки
         if text in ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]:
@@ -1146,41 +1022,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             context.user_data["duration"] = text
             
-            # === РОЗГАЛУЖЕННЯ: АДМІН vs УЧЕНЬ ===
-            user_id = update.message.from_user.id
+            # Перевірка чи учень зареєстрований
+            user = update.message.from_user
+            student = get_student_by_telegram_id(user.id)
             
-            if is_admin(user_id):
-                # АДМІН - запитуємо телефон учня
-                context.user_data["state"] = "admin_booking_phone"
+            if student:
+                # Учень зареєстрований - показуємо підтвердження
+                context.user_data["student_name"] = student[1]
+                context.user_data["student_phone"] = student[2]
+                context.user_data["student_tariff"] = student[3]
                 
-                keyboard = [[KeyboardButton("🔙 Назад")]]
-                
-                await update.message.reply_text(
-                    "📱 Введіть номер телефону учня:",
-                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-                )
-                return
+                await show_booking_confirmation(update, context)
             else:
-                # УЧЕНЬ - перевіряємо реєстрацію
-                student = get_student_by_telegram_id(user_id)
-                
-                if student:
-                    # Учень зареєстрований - показуємо підтвердження
-                    context.user_data["student_name"] = student[1]
-                    context.user_data["student_phone"] = student[2]
-                    context.user_data["student_tariff"] = student[3]
-                    
-                    await show_booking_confirmation(update, context)
-                else:
-                    # Не зареєстрований - не даємо записатися
-                    await update.message.reply_text(
-                        "⚠️ *Помилка!*\n\n"
-                        "Для запису потрібна реєстрація через спеціальне посилання.\n"
-                        "Зверніться до адміністратора.",
-                        parse_mode="Markdown"
-                    )
-                    await start(update, context)
-                return
+                # Не зареєстрований - не даємо записатися
+                await update.message.reply_text(
+                    "⚠️ *Помилка!*\n\n"
+                    "Для запису потрібна реєстрація через спеціальне посилання.\n"
+                    "Зверніться до адміністратора.",
+                    parse_mode="Markdown"
+                )
+                await start(update, context)
+            return
         
         # === ІМ'Я СТУДЕНТА ===
         if state == "waiting_for_name":
@@ -1299,37 +1161,18 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
         [KeyboardButton("🔙 Скасувати")]
     ]
     
-    # Перевіряємо хто записує
-    user_id = update.message.from_user.id
-    
-    if is_admin(user_id):
-        # ДЛЯ АДМІНА - З іменем та телефоном
-        await update.message.reply_text(
-            f"📋 *Підтвердження запису*\n\n"
-            f"👤 Учень: {name}\n"
-            f"📱 Телефон: {phone}\n"
-            f"👨‍🏫 Інструктор: {instructor}\n"
-            f"📅 Дата: {date}\n"
-            f"🕐 Час: {time}\n"
-            f"⏱ Тривалість: {duration}\n"
-            f"💰 Вартість: {price:.0f} грн\n\n"
-            f"Все вірно?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-            parse_mode="Markdown"
-        )
-    else:
-        # ДЛЯ УЧНЯ - БЕЗ імені та телефону
-        await update.message.reply_text(
-            f"📋 *Підтвердження запису*\n\n"
-            f"👨‍🏫 Інструктор: {instructor}\n"
-            f"📅 Дата: {date}\n"
-            f"🕐 Час: {time}\n"
-            f"⏱ Тривалість: {duration}\n"
-            f"💰 Вартість: {price:.0f} грн\n\n"
-            f"Все вірно?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-            parse_mode="Markdown"
-        )
+    # ДЛЯ УЧНЯ - БЕЗ імені та телефону
+    await update.message.reply_text(
+        f"📋 *Підтвердження запису*\n\n"
+        f"👨‍🏫 Інструктор: {instructor}\n"
+        f"📅 Дата: {date}\n"
+        f"🕐 Час: {time}\n"
+        f"⏱ Тривалість: {duration}\n"
+        f"💰 Вартість: {price:.0f} грн\n\n"
+        f"Все вірно?",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
 
 # ======================= INSTRUCTOR FUNCTIONS =======================
 async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
