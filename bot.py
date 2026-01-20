@@ -777,9 +777,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if text == "✅ Підтвердити":
                 await save_lesson(update, context)
                 return
+            elif text in ["💬 Додати коментар", "✏️ Змінити коментар"]:
+                # Переходимо в режим введення коментаря
+                context.user_data["state"] = "waiting_for_booking_comment"
+                
+                keyboard = [
+                    [KeyboardButton("⏭️ Пропустити")],
+                    [KeyboardButton("🔙 Назад")]
+                ]
+                
+                await update.message.reply_text(
+                    "💬 *Введіть коментар для інструктора:*\n\n"
+                    "_Наприклад:_\n"
+                    "• \"Перше заняття\"\n"
+                    "• \"Потрібно попрацювати над паркуванням\"\n"
+                    "• \"Готовий до іспиту\"",
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+                    parse_mode="Markdown"
+                )
+                return
             elif text == "🔙 Скасувати":
                 await update.message.reply_text("❌ Запис скасовано.")
                 await start(update, context)
+                return
+        
+        # === ВВЕДЕННЯ КОМЕНТАРЯ ===
+        if state == "waiting_for_booking_comment":
+            if text == "🔙 Назад":
+                # Повертаємось до підтвердження
+                context.user_data["state"] = "waiting_for_confirmation"
+                await show_booking_confirmation(update, context)
+                return
+            elif text == "⏭️ Пропустити":
+                # Видаляємо коментар якщо був
+                context.user_data["booking_comment"] = ""
+                await show_booking_confirmation(update, context)
+                return
+            else:
+                # Зберігаємо коментар
+                context.user_data["booking_comment"] = text
+                
+                await update.message.reply_text(
+                    f"✅ Коментар збережено!\n\n"
+                    f"💬 \"{text}\""
+                )
+                
+                # Повертаємось до підтвердження
+                await show_booking_confirmation(update, context)
                 return
         
         # === ВИБІР КОРОБКИ ===
@@ -1142,6 +1186,7 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
     name = context.user_data.get("student_name", "")
     phone = context.user_data.get("student_phone", "")
     student_tariff = context.user_data.get("student_tariff", 0)
+    booking_comment = context.user_data.get("booking_comment", "")
     
     # Розрахунок вартості на основі тарифу учня
     if student_tariff > 0:
@@ -1156,20 +1201,37 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
     
     context.user_data["state"] = "waiting_for_confirmation"
     
-    keyboard = [
-        [KeyboardButton("✅ Підтвердити")],
-        [KeyboardButton("🔙 Скасувати")]
-    ]
-    
-    # ДЛЯ УЧНЯ - БЕЗ імені та телефону
-    await update.message.reply_text(
+    # Формуємо текст
+    text = (
         f"📋 *Підтвердження запису*\n\n"
         f"👨‍🏫 Інструктор: {instructor}\n"
         f"📅 Дата: {date}\n"
         f"🕐 Час: {time}\n"
         f"⏱ Тривалість: {duration}\n"
-        f"💰 Вартість: {price:.0f} грн\n\n"
-        f"Все вірно?",
+        f"💰 Вартість: {price:.0f} грн\n"
+    )
+    
+    # Додаємо коментар якщо є
+    if booking_comment:
+        text += f"\n💬 Коментар:\n\"{booking_comment}\"\n"
+    
+    text += "\nВсе вірно?"
+    
+    # Кнопки
+    keyboard = [
+        [KeyboardButton("✅ Підтвердити")]
+    ]
+    
+    # Якщо коментар є - показуємо "Змінити", якщо немає - "Додати"
+    if booking_comment:
+        keyboard.append([KeyboardButton("✏️ Змінити коментар")])
+    else:
+        keyboard.append([KeyboardButton("💬 Додати коментар")])
+    
+    keyboard.append([KeyboardButton("🔙 Скасувати")])
+    
+    await update.message.reply_text(
+        text,
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         parse_mode="Markdown"
     )
@@ -1194,7 +1256,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
             cursor = conn.cursor()
             # Спочатку отримуємо всі активні заняття
             cursor.execute("""
-                SELECT date, time, duration, student_name, student_phone, status
+                SELECT date, time, duration, student_name, student_phone, status, booking_comment
                 FROM lessons
                 WHERE instructor_id = ? 
                 AND status = 'active'
@@ -1205,7 +1267,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
         
         # Фільтруємо майбутні заняття в Python
         lessons = []
-        for date, time, duration, student_name, student_phone, status in all_lessons:
+        for date, time, duration, student_name, student_phone, status, booking_comment in all_lessons:
             try:
                 # Парсимо дату з БД (ДД.ММ.РРРР)
                 lesson_datetime = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
@@ -1213,10 +1275,10 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
                 
                 # Порівнюємо
                 if lesson_datetime >= now:
-                    lessons.append((date, time, duration, student_name, student_phone, status))
+                    lessons.append((date, time, duration, student_name, student_phone, status, booking_comment))
             except:
                 # Якщо не вдалося розпарсити - показуємо всі
-                lessons.append((date, time, duration, student_name, student_phone, status))
+                lessons.append((date, time, duration, student_name, student_phone, status, booking_comment))
         
         # Обмежуємо 20 записами
         lessons = lessons[:20]
@@ -1228,7 +1290,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
         text = f"📅 *Ваш розклад:*\n\n"
         current_date = None
         
-        for date, time, duration, student_name, student_phone, status in lessons:
+        for date, time, duration, student_name, student_phone, status, booking_comment in lessons:
             if date != current_date:
                 text += f"\n📆 *{date}*\n"
                 current_date = date
@@ -1237,6 +1299,8 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
             text += f"👤 {student_name}\n"
             if student_phone:
                 text += f"📱 {student_phone}\n"
+            if booking_comment:
+                text += f"💬 \"{booking_comment}\"\n"
             text += "\n"
         
         # Додаємо тільки кнопку Назад
@@ -2197,7 +2261,7 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT l.date, l.time, l.duration, i.name, i.phone, l.status
+                SELECT l.date, l.time, l.duration, i.name, i.phone, l.status, l.booking_comment
                 FROM lessons l
                 JOIN instructors i ON l.instructor_id = i.id
                 WHERE l.student_telegram_id = ? AND l.status = 'active'
@@ -2213,9 +2277,12 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
         
         text = "📖 Ваші записи:\n\n"
         
-        for date, time, duration, instructor_name, instructor_phone, status in lessons:
+        for date, time, duration, instructor_name, instructor_phone, status, booking_comment in lessons:
             text += f"📅 {date} о {time} ({duration})\n"
-            text += f"👨‍🏫 {instructor_name} | 📱 {instructor_phone}\n\n"
+            text += f"👨‍🏫 {instructor_name} | 📱 {instructor_phone}\n"
+            if booking_comment:
+                text += f"💬 Ваш коментар: \"{booking_comment}\"\n"
+            text += "\n"
         
         await update.message.reply_text(text)
         
@@ -2703,11 +2770,13 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # ========== ВСІ ПЕРЕВІРКИ ПРОЙШЛИ - ЗБЕРІГАЄМО ==========
             
+            booking_comment = context.user_data.get("booking_comment", "")
+            
             cursor.execute("""
                 INSERT INTO lessons 
-                (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-            """, (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration))
+                (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, status, booking_comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+            """, (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, booking_comment))
             conn.commit()
         
         # Повідомлення учню (БЕЗ особистих даних)
@@ -2730,17 +2799,27 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             price = PRICES.get(duration, 400)
         
         # Повідомлення інструктору (З особистими даними ТА сумою)
+        booking_comment = context.user_data.get("booking_comment", "")
+        
         if instructor_telegram_id:
             try:
+                message_text = (
+                    f"🔔 *Новий запис!*\n\n"
+                    f"👤 Учень: {student_name}\n"
+                    f"📱 Телефон: {student_phone}\n"
+                    f"📅 Дата: {date}\n"
+                    f"🕐 Час: {time}\n"
+                    f"⏱ Тривалість: {duration}\n"
+                    f"💰 Вартість: *{price:.0f} грн*"
+                )
+                
+                # Додаємо коментар якщо є
+                if booking_comment:
+                    message_text += f"\n\n💬 Коментар учня:\n\"{booking_comment}\""
+                
                 await context.bot.send_message(
                     chat_id=instructor_telegram_id,
-                    text=f"🔔 *Новий запис!*\n\n"
-                         f"👤 Учень: {student_name}\n"
-                         f"📱 Телефон: {student_phone}\n"
-                         f"📅 Дата: {date}\n"
-                         f"🕐 Час: {time}\n"
-                         f"⏱ Тривалість: {duration}\n"
-                         f"💰 Вартість: *{price:.0f} грн*",
+                    text=message_text,
                     parse_mode="Markdown"
                 )
             except Exception as e:
@@ -3877,4 +3956,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
