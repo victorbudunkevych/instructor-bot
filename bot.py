@@ -107,10 +107,10 @@ TZ = pytz.timezone(TIMEZONE)
 def ensure_instructors_exist():
     """Автоматично додає інструкторів якщо їх немає в базі"""
     instructors = [
-        (646703680, 'Мартинович Владислав', '+380684232133', 'Автомат', 490),
+        (646703680, 'Мартинович Владислав', '+380684232133', 'Автомат', 450),
         (5077103081, 'Фірсов Артур', '+38666619757', 'Механіка', 550),
         (197658460, 'Урядко Артур', '+380502380725', 'Механіка', 550),
-        (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 490),
+        (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 450),
         (5140435045, 'Блажевський Ігор', '+380664009381', 'Механіка', 550),
         (1846725989, 'Рекетчук Богдан', '+380501591448', 'Механіка', 550),
         (831664827, 'Данилишин Святослав', '+380960755539', 'Механіка', 550)
@@ -291,9 +291,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         command = context.args[0]
         logger.info(f"🔗 Deep link виявлено: {command}")
-        if command == "register490":
-            logger.info("➡️ Перенаправлення на register_490")
-            await register_490(update, context)
+        if command == "register450":
+            logger.info("➡️ Перенаправлення на register_450")
+            await register_450(update, context)
             return
         elif command == "register550":
             logger.info("➡️ Перенаправлення на register_550")
@@ -368,13 +368,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Виникла помилка. Спробуйте /start")
 
 # ======================= REGISTRATION COMMANDS =======================
-async def register_490(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Реєстрація учня з тарифом 490 грн"""
-    logger.info("🔵 register_490 викликано!")
+async def register_450(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Реєстрація учня з тарифом 450 грн"""
+    logger.info("🔵 register_450 викликано!")
     try:
-        await register_student_with_tariff(update, context, 490)
+        await register_student_with_tariff(update, context, 450)
     except Exception as e:
-        logger.error(f"❌ Помилка в register_490: {e}", exc_info=True)
+        logger.error(f"❌ Помилка в register_450: {e}", exc_info=True)
 
 async def register_550(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Реєстрація учня з тарифом 550 грн"""
@@ -3889,7 +3889,7 @@ def main():
 
         # Команди
         app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("register490", register_490))
+        app.add_handler(CommandHandler("register450", register_450))
         app.add_handler(CommandHandler("register550", register_550))
         
         # Обробники
@@ -3908,7 +3908,7 @@ def main():
         logger.info("🚀 Бот запущено!")
         print("🚀 Бот запущено і слухає...")
         print("\n📝 Посилання для реєстрації учнів:")
-        print(f"   490 грн: https://t.me/InstructorIFBot?start=register490")
+        print(f"   450 грн: https://t.me/InstructorIFBot?start=register450")
         print(f"   550 грн: https://t.me/InstructorIFBot?start=register550")
         
         # Запускаємо polling в окремому потоці
