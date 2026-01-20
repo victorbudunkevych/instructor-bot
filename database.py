@@ -201,8 +201,9 @@ def migrate_database():
                 'reminder_2h_sent': 'INTEGER DEFAULT 0',
                 'created_at': 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP',
                 'completed_at': 'TIMESTAMP',
-                'instructor_rating': 'INTEGER',      # ← НОВЕ!
-                'instructor_feedback': 'TEXT'         # ← НОВЕ!
+                'instructor_rating': 'INTEGER',      # Оцінка інструктора для учня
+                'instructor_feedback': 'TEXT',       # Коментар інструктора про учня
+                'booking_comment': 'TEXT'            # Коментар учня при записі
             }
             
             for col, col_type in new_cols.items():
