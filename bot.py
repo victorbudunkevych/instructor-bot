@@ -17,6 +17,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters
 )
+from import_excel_handler import import_from_excel
 import pytz
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
@@ -3892,6 +3893,7 @@ def main():
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("register450", register_450))
         app.add_handler(CommandHandler("register550", register_550))
+        app.add_handler(CommandHandler("import_excel", import_from_excel))
         
         # Обробники
         app.add_handler(CallbackQueryHandler(handle_callback))
@@ -3957,3 +3959,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

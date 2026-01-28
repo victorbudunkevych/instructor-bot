@@ -593,3 +593,4 @@ def add_instructor_rating(lesson_id, rating, feedback=""):
     except Exception as e:
         logger.error(f"Помилка add_instructor_rating: {e}")
         return False
+
