@@ -593,3 +593,149 @@ def add_instructor_rating(lesson_id, rating, feedback=""):
     except Exception as e:
         logger.error(f"Помилка add_instructor_rating: {e}")
         return False
+
+# ------------------ ADD BELOW in database.py (near other DB helpers) ------------------
+def import_instructors(instructors: list, clear: bool = False):
+    """
+    instructors: list of dicts with keys possibly including:
+      id, name, transmission_type, telegram_id, phone, price_per_hour, is_active, created_at
+    If clear=True, existing instructors/students/lessons rows will be removed first (full restore mode).
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            if clear:
+                # clear dependent tables first
+                cursor.execute("DELETE FROM lessons")
+                cursor.execute("DELETE FROM students")
+                cursor.execute("DELETE FROM instructors")
+                conn.commit()
+
+            for ins in instructors:
+                # Use INSERT OR REPLACE to preserve supplied id if present
+                cursor.execute("""
+                    INSERT OR REPLACE INTO instructors
+                    (id, name, transmission_type, telegram_id, phone, price_per_hour, is_active, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    ins.get('id'),
+                    ins.get('name'),
+                    ins.get('transmission_type'),
+                    ins.get('telegram_id'),
+                    ins.get('phone'),
+                    ins.get('price_per_hour'),
+                    ins.get('is_active', 1),
+                    ins.get('created_at')
+                ))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Помилка import_instructors: {e}", exc_info=True)
+        return False
+
+
+def import_students(students: list):
+    """
+    students: list of dicts with keys possibly including:
+      id, name, phone, telegram_id, tariff, registered_via, created_at
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            for s in students:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO students
+                    (id, name, phone, telegram_id, tariff, registered_via, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    s.get('id'),
+                    s.get('name'),
+                    s.get('phone'),
+                    s.get('telegram_id'),
+                    s.get('tariff') or s.get('tariff', 0),
+                    s.get('registered_via'),
+                    s.get('created_at')
+                ))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Помилка import_students: {e}", exc_info=True)
+        return False
+
+
+def import_lessons(lessons: list):
+    """
+    lessons: list of dicts with keys:
+      id, instructor_id, instructor_name, student_name, student_telegram_id, student_phone,
+      student_tariff, date, time, duration, status, rating, feedback, cancelled_by,
+      cancelled_at, reminder_24h_sent, reminder_2h_sent, created_at, completed_at
+    Function will try to resolve instructor_id by instructor_name if instructor_id missing,
+    and student_telegram_id by existing students if missing.
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            for l in lessons:
+                instr_id = l.get('instructor_id')
+                # try to resolve by name if ID missing
+                if not instr_id and l.get('instructor_name'):
+                    cursor.execute("SELECT id FROM instructors WHERE name = ?", (l.get('instructor_name'),))
+                    r = cursor.fetchone()
+                    if r:
+                        instr_id = r[0]
+                # try to resolve student telegram id by value or name/phone
+                student_tid = l.get('student_telegram_id')
+                if not student_tid:
+                    if l.get('student_telegram_id'):
+                        student_tid = l.get('student_telegram_id')
+                    else:
+                        # try by exact telegram_id in students table
+                        if l.get('student_telegram_id'):
+                            cursor.execute("SELECT telegram_id FROM students WHERE telegram_id = ?", (l.get('student_telegram_id'),))
+                            r = cursor.fetchone()
+                            if r:
+                                student_tid = r[0]
+                        # try by name and/or phone
+                        if not student_tid and l.get('student_name'):
+                            cursor.execute("SELECT telegram_id FROM students WHERE name = ? LIMIT 1", (l.get('student_name'),))
+                            r = cursor.fetchone()
+                            if r:
+                                student_tid = r[0]
+                        if not student_tid and l.get('student_phone'):
+                            cursor.execute("SELECT telegram_id FROM students WHERE phone = ? LIMIT 1", (l.get('student_phone'),))
+                            r = cursor.fetchone()
+                            if r:
+                                student_tid = r[0]
+
+                cursor.execute("""
+                    INSERT OR REPLACE INTO lessons
+                    (id, instructor_id, student_name, student_telegram_id, student_phone,
+                     student_tariff, date, time, duration, status, rating, feedback,
+                     cancelled_by, cancelled_at, reminder_24h_sent, reminder_2h_sent, created_at, completed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    l.get('id'),
+                    instr_id,
+                    l.get('student_name'),
+                    student_tid,
+                    l.get('student_phone'),
+                    l.get('student_tariff'),
+                    l.get('date'),
+                    l.get('time'),
+                    l.get('duration'),
+                    l.get('status'),
+                    l.get('rating'),
+                    l.get('feedback'),
+                    l.get('cancelled_by'),
+                    l.get('cancelled_at'),
+                    l.get('reminder_24h_sent', 0),
+                    l.get('reminder_2h_sent', 0),
+                    l.get('created_at'),
+                    l.get('completed_at')
+                ))
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Помилка import_lessons: {e}", exc_info=True)
+        return False
+# ---------------------------------------------------------------------------------------

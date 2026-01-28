@@ -3957,3 +3957,177 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+from openpyxl import load_workbook
+from io import BytesIO
+import re
+
+# helper to map header names to canonical keys (handles slight variations)
+def _normalize_header(h: str) -> str:
+    if not h:
+        return ""
+    s = h.strip().lower()
+    # common mappings (Ukrainian variations)
+    mapping = {
+        "id": "id",
+        "дата": "date",
+        "час": "time",
+        "інструктор": "instructor_name",
+        "інструктор id": "instructor_id",
+        "учень": "student_name",
+        "ім'я": "name",
+        "телефон": "student_phone",
+        "телеграм id": "student_telegram_id",
+        "telegram id": "student_telegram_id",
+        "тариф": "student_tariff",
+        "тривалість": "duration",
+        "вартість": "earnings",
+        "статус": "status",
+        "оцінка учня": "rating",
+        "коментар": "feedback",
+        "created_at": "created_at",
+        "дата реєстрації": "created_at",
+        "tariff": "student_tariff",
+        "price_per_hour": "price_per_hour",
+        "transmission_type": "transmission_type"
+    }
+    return mapping.get(s, s.replace(" ", "_"))
+
+
+def _sheet_to_dicts(ws):
+    """Convert sheet rows to list of dicts by normalizing headers on first row"""
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return []
+    headers = [ _normalize_header(str(c)) if c is not None else "" for c in rows[0] ]
+    res = []
+    for row in rows[1:]:
+        if all([cell is None for cell in row]):
+            continue
+        d = {}
+        for i, cell in enumerate(row):
+            key = headers[i] if i < len(headers) else f"col_{i}"
+            # try convert numeric IDs to int
+            if key in ('id', 'instructor_id', 'student_telegram_id') and cell is not None:
+                try:
+                    d[key] = int(cell)
+                except:
+                    d[key] = cell
+            else:
+                d[key] = cell
+        res.append(d)
+    return res
+
+
+async def import_from_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Admin-only handler to import DB tables from an exported .xlsx.
+    Usage:
+      - Send the .xlsx as a document while in admin chat and run /import_excel
+      - Or use '/import_excel clear' command and then upload file to perform a full restore
+    Modes:
+      clear - deletes lessons, students and instructors before import (clean restore)
+      merge - just INSERT OR REPLACE rows (default)
+    """
+    user_id = update.message.from_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("❌ У вас немає доступу до цієї функції.")
+        return
+
+    mode = "merge"
+    if context.args and str(context.args[0]).lower() == "clear":
+        mode = "clear"
+
+    # If user called command with a document attached in same message:
+    doc = update.message.document
+    if not doc:
+        await update.message.reply_text(
+            "📂 Надішліть файл Excel (.xlsx) у відповідь на команду або прикріпіть файл до повідомлення."
+            "\nПриклад: /import_excel clear  (щоб повністю очистити БД, потім відновити)"
+        )
+        return
+
+    # check mime
+    if not doc.file_name.lower().endswith((".xlsx", ".xlsm", ".xltx")):
+        await update.message.reply_text("❌ Потрібен файл у форматі .xlsx (Excel).")
+        return
+
+    await update.message.reply_text("⏳ Завантажую та парсю Excel. Зачекайте...")
+
+    try:
+        file = await doc.get_file()
+        bio = BytesIO()
+        await file.download(out=bio)
+        bio.seek(0)
+        wb = load_workbook(bio, data_only=True)
+
+        instructors = []
+        students = []
+        lessons = []
+
+        # Recognize likely sheet names and parse
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            name_lower = sheet_name.strip().lower()
+            if "інструктор" in name_lower or "instructor" in name_lower:
+                instructors = _sheet_to_dicts(ws)
+            elif "учн" in name_lower or "student" in name_lower or "учні" in name_lower:
+                students = _sheet_to_dicts(ws)
+            elif "урок" in name_lower or "lesson" in name_lower:
+                lessons = _sheet_to_dicts(ws)
+            else:
+                # fallback: try to recognize by headers
+                hdrs = [ (c.value or "").lower() if c.value else "" for c in ws[1] ]
+                hdrs_join = " ".join(hdrs)
+                if "дата" in hdrs_join and ("інструктор" in hdrs_join or "учень" in hdrs_join):
+                    lessons = _sheet_to_dicts(ws)
+                elif "ім'я" in hdrs_join and ("тариф" in hdrs_join or "telegram id" in hdrs_join):
+                    students = _sheet_to_dicts(ws)
+
+        # Import into DB
+        from database import import_instructors, import_students, import_lessons
+
+        success_ins = True
+        success_students = True
+        success_lessons = True
+
+        # Import instructors first (use clear only once)
+        if instructors:
+            success_ins = import_instructors(instructors, clear=(mode == "clear"))
+        elif mode == "clear":
+            # still clear if requested even if instructors sheet absent
+            from database import get_db
+            with get_db() as conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM lessons")
+                cur.execute("DELETE FROM students")
+                cur.execute("DELETE FROM instructors")
+                conn.commit()
+
+        if students:
+            success_students = import_students(students)
+
+        if lessons:
+            success_lessons = import_lessons(lessons)
+
+        # build report
+        report_lines = []
+        if success_ins:
+            report_lines.append(f"✅ Інструктори: {len(instructors)}")
+        else:
+            report_lines.append("❌ Помилка при імпорті інструкторів")
+
+        if success_students:
+            report_lines.append(f"✅ Учні: {len(students)}")
+        else:
+            report_lines.append("❌ Помилка при імпорті учнів")
+
+        if success_lessons:
+            report_lines.append(f"✅ Уроки: {len(lessons)}")
+        else:
+            report_lines.append("❌ Помилка при імпорті уроків")
+
+        await update.message.reply_text("\n".join(report_lines))
+    except Exception as e:
+        logger.error(f"Error in import_from_excel: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Помилка при імпорті: {e}")
