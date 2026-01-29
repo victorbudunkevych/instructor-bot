@@ -1020,6 +1020,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("📅 Введіть іншу дату (ДД.ММ.РРРР):")
                 return
             
+            # ПЕРЕВІРКА: чи це час з кнопок (формат HH:MM)
+            if not re.match(r'^([0-1][0-9]|2[0-3]):[0-5][0-9]$', text):
+                logger.warning(f"⚠️ Невірний формат часу: {text}")
+                await update.message.reply_text(
+                    "⚠️ Будь ласка, оберіть час з кнопок нижче.\n\n"
+                    "Якщо потрібного часу немає - оберіть іншу дату або інструктора."
+                )
+                return
+            
+            # ПЕРЕВІРКА: чи час є серед вільних слотів
+            instructor = context.user_data.get("instructor")
+            date = context.user_data.get("date")
+            free_slots = get_available_time_slots(instructor, date)
+            
+            if text not in free_slots:
+                logger.warning(f"⚠️ Час {text} не входить у вільні слоти: {free_slots}")
+                await update.message.reply_text(
+                    "⚠️ Цей час недоступний. Будь ласка, оберіть час з доступних варіантів."
+                )
+                return
+            
             context.user_data["time"] = text
             context.user_data["state"] = "waiting_for_duration"
             
