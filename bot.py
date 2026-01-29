@@ -21,14 +21,22 @@ import pytz
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
-# ==================== ТЕСТОВА КОНФІГУРАЦІЯ ====================
-# ТЕСТОВИЙ БОТ TOKEN
+# ==================== PRODUCTION КОНФІГУРАЦІЯ ====================
+# PRODUCTION БОТ TOKEN
 TOKEN = "8337801301:AAGXhZVzyoqjED_taA2qqgtaxg8eGeFqiWQ"
 ADMIN_ID = 669706811  # Твій Telegram ID
 TIMEZONE = "Europe/Kyiv"
-# ОКРЕМА ТЕСТОВА БАЗА ДАНИХ
-DB_NAME = "driving_school.db"
-# ==============================================================
+
+# БАЗА ДАНИХ НА PERSISTENT DISK
+# Якщо є диск /var/data - використовуємо його, якщо ні - локально
+import os
+if os.path.exists("/var/data"):
+    DB_NAME = "/var/data/driving_school.db"  # На Render з Persistent Disk
+    print("✅ Використовую Persistent Disk: /var/data/driving_school.db")
+else:
+    DB_NAME = "driving_school.db"  # Локально для розробки
+    print("⚠️ Persistent Disk не знайдено, використовую локальну БД")
+# ==================================================================
 
 # Робочі години
 WORK_HOURS_START = 8
@@ -2183,6 +2191,8 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         await update.message.reply_text(text)
         await show_admin_panel(update, context)
+        await update.message.reply_text(text)
+        await show_admin_panel(update, context)
         return
     
     # Обробка періоду
@@ -3865,11 +3875,16 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ Помилка при створенні Excel файлу:\n{str(e)}"
         )
 
+# ======================= ОБРОБКА ДОКУМЕНТІВ =======================
 # ======================= MAIN =======================
 def main():
     try:
-        logger.info("🧪 ТЕСТОВА ВЕРСІЯ БОТА - driving_school_TEST.db")
+        # Встановлюємо DB_NAME в environment для database.py
+        os.environ["DB_NAME"] = DB_NAME
+        
+        logger.info("🚀 PRODUCTION ВЕРСІЯ БОТА")
         logger.info(f"🔑 TOKEN: {TOKEN[:20]}...")
+        logger.info(f"💾 БД: {DB_NAME}")
         
         init_db()
         init_lessons_table()
