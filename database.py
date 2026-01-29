@@ -24,10 +24,18 @@ def validate_date_format(date_str):
         return False
 
 # ======================= ПІДКЛЮЧЕННЯ =======================
+# Імпортуємо DB_NAME з environment або використовуємо за замовчуванням
+import os
+DB_NAME = os.getenv("DB_NAME", "driving_school.db")
+
+# Перевіряємо чи є Persistent Disk
+if os.path.exists("/var/data") and not DB_NAME.startswith("/var/data"):
+    DB_NAME = f"/var/data/{os.path.basename(DB_NAME)}"
+
 @contextmanager
 def get_db():
     """Context manager для безпечної роботи з БД"""
-    conn = sqlite3.connect("instructors.db")
+    conn = sqlite3.connect(DB_NAME)
     try:
         yield conn
     except Exception as e:
