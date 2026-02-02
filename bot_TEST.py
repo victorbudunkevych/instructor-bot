@@ -2706,9 +2706,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         end_hour = start_hour + lesson_hours
         
         with get_db() as conn:
-            # 🔒 ТРАНЗАКЦІЙНА БЛОКУВАННЯ: Запобігає race condition
-            # Блокує БД від одночасних записів поки не закінчаться всі перевірки
-            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             
             # ПЕРЕВІРКА 1: Чи учень вже має урок в цей час (у будь-якого інструктора)
@@ -2808,7 +2805,7 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             # ✅ ПЕРЕВІРКА 4: Чи інструктор вільний на цей час (КРИТИЧНО!)
-            logger.info(f"🔍 Перевірка зайнятості: інструктор_id={instructor_id}, дата={date}, час={time}")
+            # Перевіряємо чи немає іншого учня на цей час у цього інструктора
             cursor.execute("""
                 SELECT student_name, student_telegram_id, time, duration
                 FROM lessons
@@ -2816,12 +2813,10 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """, (instructor_id, date))
             
             instructor_lessons = cursor.fetchall()
-            logger.info(f"📊 Знайдено {len(instructor_lessons)} активних уроків у інструктора на {date}")
             
             for other_student_name, other_student_id, other_time, other_duration in instructor_lessons:
                 # Якщо це той самий учень - пропускаємо (дозволяємо оновити запис)
                 if other_student_id == student_telegram_id:
-                    logger.info(f"⏭️ Пропускаю: той самий учень (id={other_student_id})")
                     continue
                 
                 other_start = int(other_time.split(':')[0])
@@ -2835,7 +2830,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Перевірка перетину часу
                 if not (end_hour <= other_start or start_hour >= other_end):
-                    logger.warning(f"❌ КОНФЛІКТ! Інструктор зайнятий: {other_student_name} має урок о {other_time}")
                     await update.message.reply_text(
                         f"❌ *Інструктор зайнятий!*\n\n"
                         f"На цей час вже записаний інший учень:\n"
@@ -2846,8 +2840,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown"
                     )
                     return
-            
-            logger.info(f"✅ Всі перевірки пройдені! Зберігаю урок: {student_name} → {instructor_name}, {date} {time}")
             
             # ========== ВСІ ПЕРЕВІРКИ ПРОЙШЛИ - ЗБЕРІГАЄМО ==========
             
