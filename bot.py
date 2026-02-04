@@ -2091,7 +2091,7 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
                 FROM schedule_blocks
                 WHERE instructor_id = ?
                 ORDER BY date, time_start
-                LIMIT 10
+                LIMIT 30
             """, (instructor_id,))
             
             blocks = cursor.fetchall()
