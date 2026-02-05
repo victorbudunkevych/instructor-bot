@@ -1321,7 +1321,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
                 lessons.append((date, time, duration, student_name, student_phone, status, booking_comment))
         
         # Обмежуємо 20 записами
-        lessons = lessons[:20]
+        lessons = lessons[:100]
         
         if not lessons:
             await update.message.reply_text("📋 У вас поки немає запланованих занять.")
