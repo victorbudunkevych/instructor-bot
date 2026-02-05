@@ -23,13 +23,13 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 # ==================== TEST КОНФІГУРАЦІЯ ====================
 # ТЕСТОВИЙ БОТ TOKEN
-TOKEN = "8215653253:AAHbqzHTw4mhkQOHs18eGIqUn1ovavbrPeg"
+TOKEN = "8320903421:AAFCQaK3Dc5QGlSit3Ddsb6HyFN35LEnBzg"
 ADMIN_ID = 669706811  # Твій Telegram ID
 TIMEZONE = "Europe/Kyiv"
 
-# БАЗА ДАНИХ (БЕЗ PERSISTENT DISK ДЛЯ ТЕСТІВ)
-DB_NAME = "driving_school.db"  # Локальна БД для тестування
-print("⚠️ ТЕСТОВИЙ БОТ: Використовую локальну БД (дані втрачаються при рестарті на Render)")
+# БАЗА ДАНИХ (ЛОКАЛЬНА ДЛЯ ТЕСТУВАННЯ)
+DB_NAME = "driving_school_TEST.db"
+print("⚠️ ТЕСТОВИЙ БОТ: Використовую локальну БД: driving_school_TEST.db")
 # ==================================================================
 
 # Робочі години
@@ -110,7 +110,7 @@ def ensure_instructors_exist():
     """Автоматично додає інструкторів якщо їх немає в базі"""
     instructors = [
         (646703680, 'Мартович Владислав', '+380684232133', 'Автомат', 450),
-        (5077103081, 'Фірсов Артур', '+38666619757', 'Механіка', 550),
+        (5077103081, 'Фірсов Артур', '+380666619757', 'Механіка', 550),
         (197658460, 'Урядко Артур', '+380502380725', 'Механіка', 550),
         (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 450),
         (2042857396, 'Будункевич Мирослав', '+380982534001', 'Механіка', 450),
@@ -1315,7 +1315,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
                 lessons.append((date, time, duration, student_name, student_phone, status, booking_comment))
         
         # Обмежуємо 20 записами
-        lessons = lessons[:20]
+        lessons = lessons[:100]
         
         if not lessons:
             await update.message.reply_text("📋 У вас поки немає запланованих занять.")
@@ -2085,7 +2085,7 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
                 FROM schedule_blocks
                 WHERE instructor_id = ?
                 ORDER BY date, time_start
-                LIMIT 10
+                LIMIT 30
             """, (instructor_id,))
             
             blocks = cursor.fetchall()
@@ -2706,6 +2706,9 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         end_hour = start_hour + lesson_hours
         
         with get_db() as conn:
+            # 🔒 ТРАНЗАКЦІЙНА БЛОКУВАННЯ: Запобігає race condition
+            # Блокує БД від одночасних записів поки не закінчаться всі перевірки
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             
             # ПЕРЕВІРКА 1: Чи учень вже має урок в цей час (у будь-якого інструктора)
@@ -2805,7 +2808,7 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             # ✅ ПЕРЕВІРКА 4: Чи інструктор вільний на цей час (КРИТИЧНО!)
-            # Перевіряємо чи немає іншого учня на цей час у цього інструктора
+            logger.info(f"🔍 Перевірка зайнятості: інструктор_id={instructor_id}, дата={date}, час={time}")
             cursor.execute("""
                 SELECT student_name, student_telegram_id, time, duration
                 FROM lessons
@@ -2813,10 +2816,12 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """, (instructor_id, date))
             
             instructor_lessons = cursor.fetchall()
+            logger.info(f"📊 Знайдено {len(instructor_lessons)} активних уроків у інструктора на {date}")
             
             for other_student_name, other_student_id, other_time, other_duration in instructor_lessons:
                 # Якщо це той самий учень - пропускаємо (дозволяємо оновити запис)
                 if other_student_id == student_telegram_id:
+                    logger.info(f"⏭️ Пропускаю: той самий учень (id={other_student_id})")
                     continue
                 
                 other_start = int(other_time.split(':')[0])
@@ -2830,6 +2835,7 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Перевірка перетину часу
                 if not (end_hour <= other_start or start_hour >= other_end):
+                    logger.warning(f"❌ КОНФЛІКТ! Інструктор зайнятий: {other_student_name} має урок о {other_time}")
                     await update.message.reply_text(
                         f"❌ *Інструктор зайнятий!*\n\n"
                         f"На цей час вже записаний інший учень:\n"
@@ -2840,6 +2846,8 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown"
                     )
                     return
+            
+            logger.info(f"✅ Всі перевірки пройдені! Зберігаю урок: {student_name} → {instructor_name}, {date} {time}")
             
             # ========== ВСІ ПЕРЕВІРКИ ПРОЙШЛИ - ЗБЕРІГАЄМО ==========
             
