@@ -1,5 +1,6 @@
 # bot.py - ВЕРСІЯ 20 PRODUCTION
 # ВИПРАВЛЕННЯ: rate_student_menu тепер показує всі completed уроки з оцінками - ТЕСТОВА ВЕРСІЯ З ОКРЕМОЮ БД
+# 🟢 VERSION 3 - WITH MANAGERS NOTIFICATION 🟢
 import sqlite3
 import re
 import logging
@@ -291,6 +292,35 @@ def is_admin(user_id):
     return user_id == ADMIN_ID
 
 # ======================= START =======================
+async def test_managers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ТЕСТОВА КОМАНДА: Перевірка відправки повідомлень менеджерам"""
+    user_id = update.message.from_user.id
+    
+    # Тільки адмін може викликати
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Ця команда доступна тільки адміну.")
+        return
+    
+    await update.message.reply_text("🔄 Тестую відправку повідомлень менеджерам...")
+    
+    results = []
+    for manager_chat_id in NOTIFICATION_CHAT_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=manager_chat_id,
+                text=f"✅ *ТЕСТ*\n\nЦе тестове повідомлення від бота автошколи.\n\n"
+                     f"Якщо ви бачите це повідомлення - сповіщення про скасування уроків будуть приходити коректно!",
+                parse_mode="Markdown"
+            )
+            results.append(f"✅ {manager_chat_id} - успішно")
+            logger.info(f"✅ Test notification sent to manager {manager_chat_id}")
+        except Exception as e:
+            results.append(f"❌ {manager_chat_id} - помилка: {str(e)}")
+            logger.error(f"❌ Failed to send test to manager {manager_chat_id}: {e}")
+    
+    result_text = "📊 *Результати тесту:*\n\n" + "\n".join(results)
+    await update.message.reply_text(result_text, parse_mode="Markdown")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Головне меню"""
     user_id = update.message.from_user.id
@@ -2673,8 +2703,10 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                     text=notification_text,
                     parse_mode="Markdown"
                 )
+                logger.info(f"✅ Notification sent to instructor {instructor_telegram_id}")
                 
                 # Відправка менеджерам
+                logger.info(f"📤 Attempting to notify {len(NOTIFICATION_CHAT_IDS)} managers...")
                 for manager_chat_id in NOTIFICATION_CHAT_IDS:
                     try:
                         manager_notification = (
@@ -2687,6 +2719,7 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                             f"⏱ Тривалість: {duration}\n"
                             f"💰 Сума: {price:.0f} грн"
                         )
+                        logger.info(f"📨 Sending to manager {manager_chat_id}...")
                         await context.bot.send_message(
                             chat_id=manager_chat_id,
                             text=manager_notification,
@@ -3983,6 +4016,11 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ======================= MAIN =======================
 def main():
     try:
+        print("=" * 70)
+        print("🟢 BOT VERSION: v3 WITH MANAGERS NOTIFICATION")
+        print("📋 NOTIFICATION_CHAT_IDS:", NOTIFICATION_CHAT_IDS)
+        print("=" * 70)
+        
         # Встановлюємо DB_NAME в environment для database.py
         os.environ["DB_NAME"] = DB_NAME
         
@@ -4011,6 +4049,7 @@ def main():
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("register450", register_450))
         app.add_handler(CommandHandler("register550", register_550))
+        app.add_handler(CommandHandler("test_managers", test_managers))  # Тестова команда
         
         # Обробники
         app.add_handler(CallbackQueryHandler(handle_callback))
