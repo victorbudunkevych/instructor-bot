@@ -27,6 +27,12 @@ TOKEN = "8320903421:AAFCQaK3Dc5QGlSit3Ddsb6HyFN35LEnBzg"
 ADMIN_ID = 669706811  # Твій Telegram ID
 TIMEZONE = "Europe/Kyiv"
 
+# Додаткові chat_id для сповіщень про скасування уроків
+NOTIFICATION_CHAT_IDS = [
+    648021272,  # Кузенко Руслана
+    884453802   # Стефанюк Ірина
+]
+
 # БАЗА ДАНИХ (ЛОКАЛЬНА ДЛЯ ТЕСТУВАННЯ)
 DB_NAME = "driving_school_TEST.db"
 print("⚠️ ТЕСТОВИЙ БОТ: Використовую локальну БД: driving_school_TEST.db")
@@ -2651,17 +2657,45 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                 else:
                     price = PRICES.get(duration, 400)
                 
+                notification_text = (
+                    f"🔔 *Урок скасовано учнем*\n\n"
+                    f"👤 Учень: {student_name}\n"
+                    f"📱 Телефон: {student_phone}\n"
+                    f"📅 Дата: {date}\n"
+                    f"🕐 Час: {time}\n"
+                    f"⏱ Тривалість: {duration}\n"
+                    f"💰 Сума: {price:.0f} грн"
+                )
+                
+                # Відправка інструктору
                 await context.bot.send_message(
                     chat_id=instructor_telegram_id,
-                    text=f"🔔 *Урок скасовано учнем*\n\n"
-                         f"👤 Учень: {student_name}\n"
-                         f"📱 Телефон: {student_phone}\n"
-                         f"📅 Дата: {date}\n"
-                         f"🕐 Час: {time}\n"
-                         f"⏱ Тривалість: {duration}\n"
-                         f"💰 Сума: {price:.0f} грн",
+                    text=notification_text,
                     parse_mode="Markdown"
                 )
+                
+                # Відправка менеджерам
+                for manager_chat_id in NOTIFICATION_CHAT_IDS:
+                    try:
+                        manager_notification = (
+                            f"⚠️ *Скасування уроку*\n\n"
+                            f"👤 Учень: {student_name}\n"
+                            f"📱 Телефон: {student_phone}\n"
+                            f"👨‍🏫 Інструктор: {instructor_name}\n"
+                            f"📅 Дата: {date}\n"
+                            f"🕐 Час: {time}\n"
+                            f"⏱ Тривалість: {duration}\n"
+                            f"💰 Сума: {price:.0f} грн"
+                        )
+                        await context.bot.send_message(
+                            chat_id=manager_chat_id,
+                            text=manager_notification,
+                            parse_mode="Markdown"
+                        )
+                        logger.info(f"✅ Notification sent to manager {manager_chat_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to notify manager {manager_chat_id}: {e}")
+                
             except Exception as e:
                 logger.error(f"Failed to notify instructor: {e}")
         
