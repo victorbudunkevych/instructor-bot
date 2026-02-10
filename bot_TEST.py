@@ -1,6 +1,5 @@
 # bot.py - ВЕРСІЯ 20 PRODUCTION
 # ВИПРАВЛЕННЯ: rate_student_menu тепер показує всі completed уроки з оцінками - ТЕСТОВА ВЕРСІЯ З ОКРЕМОЮ БД
-# 🟢 VERSION 3 - WITH MANAGERS NOTIFICATION 🟢
 import sqlite3
 import re
 import logging
@@ -28,7 +27,7 @@ TOKEN = "8320903421:AAFCQaK3Dc5QGlSit3Ddsb6HyFN35LEnBzg"
 ADMIN_ID = 669706811  # Твій Telegram ID
 TIMEZONE = "Europe/Kyiv"
 
-# Додаткові chat_id для сповіщень про скасування уроків
+# 🟢 СПОВІЩЕННЯ МЕНЕДЖЕРІВ ПРО СКАСУВАННЯ УРОКІВ 🟢
 NOTIFICATION_CHAT_IDS = [
     648021272,  # Кузенко Руслана
     884453802   # Стефанюк Ірина
@@ -36,6 +35,10 @@ NOTIFICATION_CHAT_IDS = [
 
 # БАЗА ДАНИХ (ЛОКАЛЬНА ДЛЯ ТЕСТУВАННЯ)
 DB_NAME = "driving_school_TEST.db"
+print("=" * 70)
+print("🟢 BOT VERSION: MANAGERS NOTIFICATION ENABLED")
+print(f"📋 NOTIFICATION_CHAT_IDS: {NOTIFICATION_CHAT_IDS}")
+print("=" * 70)
 print("⚠️ ТЕСТОВИЙ БОТ: Використовую локальну БД: driving_school_TEST.db")
 # ==================================================================
 
@@ -293,7 +296,7 @@ def is_admin(user_id):
 
 # ======================= START =======================
 async def test_managers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ТЕСТОВА КОМАНДА: Перевірка відправки повідомлень менеджерам"""
+    """🧪 ТЕСТОВА КОМАНДА: Перевірка відправки повідомлень менеджерам"""
     user_id = update.message.from_user.id
     
     # Тільки адмін може викликати
@@ -2687,26 +2690,22 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                 else:
                     price = PRICES.get(duration, 400)
                 
-                notification_text = (
-                    f"🔔 *Урок скасовано учнем*\n\n"
-                    f"👤 Учень: {student_name}\n"
-                    f"📱 Телефон: {student_phone}\n"
-                    f"📅 Дата: {date}\n"
-                    f"🕐 Час: {time}\n"
-                    f"⏱ Тривалість: {duration}\n"
-                    f"💰 Сума: {price:.0f} грн"
-                )
-                
                 # Відправка інструктору
                 await context.bot.send_message(
                     chat_id=instructor_telegram_id,
-                    text=notification_text,
+                    text=f"🔔 *Урок скасовано учнем*\n\n"
+                         f"👤 Учень: {student_name}\n"
+                         f"📱 Телефон: {student_phone}\n"
+                         f"📅 Дата: {date}\n"
+                         f"🕐 Час: {time}\n"
+                         f"⏱ Тривалість: {duration}\n"
+                         f"💰 Сума: {price:.0f} грн",
                     parse_mode="Markdown"
                 )
                 logger.info(f"✅ Notification sent to instructor {instructor_telegram_id}")
                 
-                # Відправка менеджерам
-                logger.info(f"📤 Attempting to notify {len(NOTIFICATION_CHAT_IDS)} managers...")
+                # 🟢 ВІДПРАВКА МЕНЕДЖЕРАМ 🟢
+                logger.info(f"📤 Attempting to notify {len(NOTIFICATION_CHAT_IDS)} managers about lesson cancellation...")
                 for manager_chat_id in NOTIFICATION_CHAT_IDS:
                     try:
                         manager_notification = (
@@ -4016,11 +4015,6 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ======================= MAIN =======================
 def main():
     try:
-        print("=" * 70)
-        print("🟢 BOT VERSION: v3 WITH MANAGERS NOTIFICATION")
-        print("📋 NOTIFICATION_CHAT_IDS:", NOTIFICATION_CHAT_IDS)
-        print("=" * 70)
-        
         # Встановлюємо DB_NAME в environment для database.py
         os.environ["DB_NAME"] = DB_NAME
         
@@ -4049,7 +4043,7 @@ def main():
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("register450", register_450))
         app.add_handler(CommandHandler("register550", register_550))
-        app.add_handler(CommandHandler("test_managers", test_managers))  # Тестова команда
+        app.add_handler(CommandHandler("test_managers", test_managers))  # 🧪 Тестова команда
         
         # Обробники
         app.add_handler(CallbackQueryHandler(handle_callback))
