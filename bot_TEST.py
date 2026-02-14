@@ -1,4 +1,4 @@
-# bot_TEST.py - ВЕРСІЯ 20 З РОЗДІЛЬНИМИ ОЦІНКАМИ + ЗАБЛОКОВАНІ ЧАСИ + ВИДІЛЕННЯ ВИХІДНИХ
+# bot.py - ВЕРСІЯ 20 PRODUCTION
 # ВИПРАВЛЕННЯ: rate_student_menu тепер показує всі completed уроки з оцінками - ТЕСТОВА ВЕРСІЯ З ОКРЕМОЮ БД
 import sqlite3
 import re
@@ -21,19 +21,26 @@ import pytz
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
-# ==================== ТЕСТОВА КОНФІГУРАЦІЯ ====================
+# ==================== TEST КОНФІГУРАЦІЯ ====================
 # ТЕСТОВИЙ БОТ TOKEN
 TOKEN = "8320903421:AAFCQaK3Dc5QGlSit3Ddsb6HyFN35LEnBzg"
-# СПИСОК АДМІНІВ
-ADMIN_IDS = [
-    669706811,  # Адмін 1 (головний)
-    648021272,  # Адмін 2
-    884453802   # Адмін 3
-]
+ADMIN_ID = 669706811  # Твій Telegram ID
 TIMEZONE = "Europe/Kyiv"
-# ОКРЕМА ТЕСТОВА БАЗА ДАНИХ
+
+# 🟢 СПОВІЩЕННЯ МЕНЕДЖЕРІВ ПРО СКАСУВАННЯ УРОКІВ 🟢
+NOTIFICATION_CHAT_IDS = [
+    648021272,  # Кузенко Руслана
+    884453802   # Стефанюк Ірина
+]
+
+# БАЗА ДАНИХ (ЛОКАЛЬНА ДЛЯ ТЕСТУВАННЯ)
 DB_NAME = "driving_school_TEST.db"
-# ==============================================================
+print("=" * 70)
+print("🟢 BOT VERSION: MANAGERS NOTIFICATION ENABLED")
+print(f"📋 NOTIFICATION_CHAT_IDS: {NOTIFICATION_CHAT_IDS}")
+print("=" * 70)
+print("⚠️ ТЕСТОВИЙ БОТ: Використовую локальну БД: driving_school_TEST.db")
+# ==================================================================
 
 # Робочі години
 WORK_HOURS_START = 8
@@ -80,37 +87,6 @@ def add_instructor_rating(lesson_id, rating, feedback=""):
         logger.error(f"Error in add_instructor_rating: {e}", exc_info=True)
         return False
 
-def get_student_by_phone(phone):
-    """Отримати учня за номером телефону"""
-    try:
-        # Очищаємо номер від пробілів, дефісів, дужок
-        clean_phone = re.sub(r'[\s\-\(\)]', '', phone)
-        
-        with get_db() as conn:
-            cursor = conn.cursor()
-            # Шукаємо по очищеному номеру
-            cursor.execute("""
-                SELECT telegram_id, name, phone, tariff
-                FROM students
-                WHERE REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', '') LIKE ?
-                   OR REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', '') LIKE ?
-            """, (f"%{clean_phone[-9:]}", f"%{clean_phone}%"))
-            
-            result = cursor.fetchone()
-            
-            if result:
-                return {
-                    'telegram_id': result[0],
-                    'name': result[1],
-                    'phone': result[2],
-                    'tariff': result[3]
-                }
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error in get_student_by_phone: {e}", exc_info=True)
-        return None
-
 # Перевизначаємо get_db для тестової БД
 @contextmanager
 def get_db():
@@ -143,13 +119,14 @@ TZ = pytz.timezone(TIMEZONE)
 def ensure_instructors_exist():
     """Автоматично додає інструкторів якщо їх немає в базі"""
     instructors = [
-        (280240917, 'Шепшелей Владислав', '+380673441441', 'Автомат', 490),
-        (666619757, 'Фірсов Артур', '+380000000000', 'Механіка', 550),
-        (982534001, 'Будункевич Мирослав', '+380000000000', 'Механіка', 550),
-        (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 490),
-        (6640009381, 'Блажевський Ігор', '+380000000000', 'Механіка', 550),
-        (501591448, 'Рекетчук Богдан', '+380000000000', 'Механіка', 550),
-        (960755539, 'Данилишин Святослав', '+380000000000', 'Механіка', 550)
+        (646703680, 'Мартович Владислав', '+380684232133', 'Автомат', 450),
+        (5077103081, 'Фірсов Артур', '+380666619757', 'Механіка', 550),
+        (197658460, 'Урядко Артур', '+380502380725', 'Механіка', 550),
+        (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 450),
+        (2042857396, 'Будункевич Мирослав', '+380982534001', 'Механіка', 450),
+        (5140435045, 'Блажевський Ігор', '+380664009381', 'Механіка', 550),
+        (1846725989, 'Рекетчук Богдан', '+380501591448', 'Механіка', 550),
+        (831664827, 'Данилишин Святослав', '+380960755539', 'Механіка', 550)
     ]
     
     with get_db() as conn:
@@ -315,9 +292,38 @@ def validate_date_format(date_str):
 
 def is_admin(user_id):
     """Перевірка чи користувач є адміном"""
-    return user_id in ADMIN_IDS
+    return user_id == ADMIN_ID
 
 # ======================= START =======================
+async def test_managers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """🧪 ТЕСТОВА КОМАНДА: Перевірка відправки повідомлень менеджерам"""
+    user_id = update.message.from_user.id
+    
+    # Тільки адмін може викликати
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Ця команда доступна тільки адміну.")
+        return
+    
+    await update.message.reply_text("🔄 Тестую відправку повідомлень менеджерам...")
+    
+    results = []
+    for manager_chat_id in NOTIFICATION_CHAT_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=manager_chat_id,
+                text=f"✅ *ТЕСТ*\n\nЦе тестове повідомлення від бота автошколи.\n\n"
+                     f"Якщо ви бачите це повідомлення - сповіщення про скасування уроків будуть приходити коректно!",
+                parse_mode="Markdown"
+            )
+            results.append(f"✅ {manager_chat_id} - успішно")
+            logger.info(f"✅ Test notification sent to manager {manager_chat_id}")
+        except Exception as e:
+            results.append(f"❌ {manager_chat_id} - помилка: {str(e)}")
+            logger.error(f"❌ Failed to send test to manager {manager_chat_id}: {e}")
+    
+    result_text = "📊 *Результати тесту:*\n\n" + "\n".join(results)
+    await update.message.reply_text(result_text, parse_mode="Markdown")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Головне меню"""
     user_id = update.message.from_user.id
@@ -327,9 +333,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         command = context.args[0]
         logger.info(f"🔗 Deep link виявлено: {command}")
-        if command == "register490":
-            logger.info("➡️ Перенаправлення на register_490")
-            await register_490(update, context)
+        if command == "register450":
+            logger.info("➡️ Перенаправлення на register_450")
+            await register_450(update, context)
             return
         elif command == "register550":
             logger.info("➡️ Перенаправлення на register_550")
@@ -404,13 +410,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Виникла помилка. Спробуйте /start")
 
 # ======================= REGISTRATION COMMANDS =======================
-async def register_490(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Реєстрація учня з тарифом 490 грн"""
-    logger.info("🔵 register_490 викликано!")
+async def register_450(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Реєстрація учня з тарифом 450 грн"""
+    logger.info("🔵 register_450 викликано!")
     try:
-        await register_student_with_tariff(update, context, 490)
+        await register_student_with_tariff(update, context, 450)
     except Exception as e:
-        logger.error(f"❌ Помилка в register_490: {e}", exc_info=True)
+        logger.error(f"❌ Помилка в register_450: {e}", exc_info=True)
 
 async def register_550(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Реєстрація учня з тарифом 550 грн"""
@@ -468,99 +474,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"📥 Message: '{text}' | State: '{state}'")
     
     try:
-        # === АДМІН: ЗАПИС УЧНЯ ===
-        if state == "admin_booking_phone":
-            if text == "🔙 Назад":
-                context.user_data["state"] = "waiting_for_duration"
-                keyboard = [
-                    [KeyboardButton("1 година")],
-                    [KeyboardButton("2 години")],
-                    [KeyboardButton("🔙 Назад")]
-                ]
-                await update.message.reply_text(
-                    "⏱ Оберіть тривалість заняття:",
-                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-                )
-                return
-            
-            # Перевіряємо валідність телефону
-            if not validate_phone(text):
-                await update.message.reply_text("⚠️ Невірний формат номера. Спробуйте ще раз:")
-                return
-            
-            phone = text
-            
-            # Шукаємо учня в базі за телефоном
-            student_data = get_student_by_phone(phone)
-            
-            if student_data:
-                # Учень знайдений - беремо дані з бази
-                context.user_data["student_name"] = student_data['name']
-                context.user_data["student_phone"] = student_data['phone']
-                context.user_data["student_tariff"] = student_data['tariff']
-                context.user_data["student_telegram_id"] = student_data.get('telegram_id', 0)
-                
-                await update.message.reply_text(
-                    f"✅ Учень знайдений в базі!\n\n"
-                    f"👤 Ім'я: {student_data['name']}\n"
-                    f"💰 Тариф: {student_data['tariff']} грн/год"
-                )
-                
-                # Показуємо підтвердження
-                await show_booking_confirmation(update, context)
-            else:
-                # Учня немає - запитуємо ім'я
-                context.user_data["student_phone"] = phone
-                context.user_data["state"] = "admin_booking_name"
-                
-                keyboard = [[KeyboardButton("🔙 Назад")]]
-                
-                await update.message.reply_text(
-                    "📝 Учня не знайдено в базі.\n\n"
-                    "Введіть ім'я та прізвище учня:",
-                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-                )
-            return
-        
-        if state == "admin_booking_name":
-            if text == "🔙 Назад":
-                context.user_data["state"] = "admin_booking_phone"
-                await update.message.reply_text("📱 Введіть номер телефону учня:")
-                return
-            
-            context.user_data["student_name"] = text
-            context.user_data["state"] = "admin_booking_tariff"
-            
-            keyboard = [
-                [KeyboardButton("490 грн")],
-                [KeyboardButton("550 грн")],
-                [KeyboardButton("🔙 Назад")]
-            ]
-            
-            await update.message.reply_text(
-                "💰 Оберіть тариф для учня:",
-                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-            )
-            return
-        
-        if state == "admin_booking_tariff":
-            if text == "🔙 Назад":
-                context.user_data["state"] = "admin_booking_name"
-                await update.message.reply_text("📝 Введіть ім'я та прізвище учня:")
-                return
-            
-            if text not in ["490 грн", "550 грн"]:
-                await update.message.reply_text("⚠️ Оберіть тариф з меню.")
-                return
-            
-            tariff = int(text.split()[0])
-            context.user_data["student_tariff"] = tariff
-            context.user_data["student_telegram_id"] = 0  # Для адмін-записів
-            
-            # Показуємо підтвердження
-            await show_booking_confirmation(update, context)
-            return
-        
         # === ОЦІНЮВАННЯ ІНСТРУКТОРА УЧНЕМ ===
         # Крок 1: Отримання оцінки
         if text in ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]:
@@ -786,7 +699,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_admin_panel(update, context)
             return
         
-        if text == "📥 Експорт в Excel":
+        if text == "📥 Імпорт даних":
+            await show_import_menu(update, context)
+            return
+        
+        if text == "📊 Експорт в Excel":
             await show_export_period_menu(update, context)
             return
         
@@ -805,6 +722,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if state == "export_custom_period":
             await handle_export_custom_period(update, context)
+            return
+        
+        # === ІМПОРТ ДАНИХ ===
+        if state == "waiting_for_import_file":
+            if update.message.document:
+                await handle_import_file(update, context)
+            elif text == "🔙 Назад в адмін панель":
+                context.user_data.clear()
+                await show_admin_panel(update, context)
+            else:
+                await update.message.reply_text(
+                    "❌ Завантажте Excel файл (.xlsx або .xls)\n\n"
+                    "Або натисніть '🔙 Назад в адмін панель'"
+                )
             return
 
         # === МЕНЮ ІНСТРУКТОРА ===
@@ -906,9 +837,53 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if text == "✅ Підтвердити":
                 await save_lesson(update, context)
                 return
+            elif text in ["💬 Додати коментар", "✏️ Змінити коментар"]:
+                # Переходимо в режим введення коментаря
+                context.user_data["state"] = "waiting_for_booking_comment"
+                
+                keyboard = [
+                    [KeyboardButton("⏭️ Пропустити")],
+                    [KeyboardButton("🔙 Назад")]
+                ]
+                
+                await update.message.reply_text(
+                    "💬 *Введіть коментар для інструктора:*\n\n"
+                    "_Наприклад:_\n"
+                    "• \"Перше заняття\"\n"
+                    "• \"буду чекати в Тисмениці\"\n"
+                    "• \"практичний іспиту\"",
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+                    parse_mode="Markdown"
+                )
+                return
             elif text == "🔙 Скасувати":
                 await update.message.reply_text("❌ Запис скасовано.")
                 await start(update, context)
+                return
+        
+        # === ВВЕДЕННЯ КОМЕНТАРЯ ===
+        if state == "waiting_for_booking_comment":
+            if text == "🔙 Назад":
+                # Повертаємось до підтвердження
+                context.user_data["state"] = "waiting_for_confirmation"
+                await show_booking_confirmation(update, context)
+                return
+            elif text == "⏭️ Пропустити":
+                # Видаляємо коментар якщо був
+                context.user_data["booking_comment"] = ""
+                await show_booking_confirmation(update, context)
+                return
+            else:
+                # Зберігаємо коментар
+                context.user_data["booking_comment"] = text
+                
+                await update.message.reply_text(
+                    f"✅ Коментар збережено!\n\n"
+                    f"💬 \"{text}\""
+                )
+                
+                # Повертаємось до підтвердження
+                await show_booking_confirmation(update, context)
                 return
         
         # === ВИБІР КОРОБКИ ===
@@ -1005,6 +980,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
+            # ПЕРЕВІРКА: чи це кнопка з датою, а не вручну введена дата
+            valid_date_markers = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд", "🟦", "🟥"]
+            if not any(marker in text for marker in valid_date_markers):
+                logger.warning(f"⚠️ Спроба ввести дату вручну: {text}")
+                await update.message.reply_text(
+                    "⚠️ Будь ласка, оберіть дату з кнопок нижче.\n\n"
+                    "Якщо потрібної дати немає у списку - зверніться до адміністратора або оберіть іншого інструктора."
+                )
+                return
+            
             # Витягуємо дату з формату "Пн 13.12 (3)", "🟦 Сб 13.12 (3)" або "Пн 13.12.2024"
             date_parts = text.split()
             
@@ -1086,6 +1071,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("📅 Введіть іншу дату (ДД.ММ.РРРР):")
                 return
             
+            # ПЕРЕВІРКА: чи це час з кнопок (формат HH:MM)
+            if not re.match(r'^([0-1][0-9]|2[0-3]):[0-5][0-9]$', text):
+                logger.warning(f"⚠️ Невірний формат часу: {text}")
+                await update.message.reply_text(
+                    "⚠️ Будь ласка, оберіть час з кнопок нижче.\n\n"
+                    "Якщо потрібного часу немає - оберіть іншу дату або інструктора."
+                )
+                return
+            
+            # ПЕРЕВІРКА: чи час є серед вільних слотів
+            instructor = context.user_data.get("instructor")
+            date = context.user_data.get("date")
+            free_slots = get_available_time_slots(instructor, date)
+            
+            if text not in free_slots:
+                logger.warning(f"⚠️ Час {text} не входить у вільні слоти: {free_slots}")
+                await update.message.reply_text(
+                    "⚠️ Цей час недоступний. Будь ласка, оберіть час з доступних варіантів."
+                )
+                return
+            
             context.user_data["time"] = text
             context.user_data["state"] = "waiting_for_duration"
             
@@ -1151,41 +1157,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             context.user_data["duration"] = text
             
-            # === РОЗГАЛУЖЕННЯ: АДМІН vs УЧЕНЬ ===
-            user_id = update.message.from_user.id
+            # Перевірка чи учень зареєстрований
+            user = update.message.from_user
+            student = get_student_by_telegram_id(user.id)
             
-            if is_admin(user_id):
-                # АДМІН - запитуємо телефон учня
-                context.user_data["state"] = "admin_booking_phone"
+            if student:
+                # Учень зареєстрований - показуємо підтвердження
+                context.user_data["student_name"] = student[1]
+                context.user_data["student_phone"] = student[2]
+                context.user_data["student_tariff"] = student[3]
                 
-                keyboard = [[KeyboardButton("🔙 Назад")]]
-                
-                await update.message.reply_text(
-                    "📱 Введіть номер телефону учня:",
-                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-                )
-                return
+                await show_booking_confirmation(update, context)
             else:
-                # УЧЕНЬ - перевіряємо реєстрацію
-                student = get_student_by_telegram_id(user_id)
-                
-                if student:
-                    # Учень зареєстрований - показуємо підтвердження
-                    context.user_data["student_name"] = student[1]
-                    context.user_data["student_phone"] = student[2]
-                    context.user_data["student_tariff"] = student[3]
-                    
-                    await show_booking_confirmation(update, context)
-                else:
-                    # Не зареєстрований - не даємо записатися
-                    await update.message.reply_text(
-                        "⚠️ *Помилка!*\n\n"
-                        "Для запису потрібна реєстрація через спеціальне посилання.\n"
-                        "Зверніться до адміністратора.",
-                        parse_mode="Markdown"
-                    )
-                    await start(update, context)
-                return
+                # Не зареєстрований - не даємо записатися
+                await update.message.reply_text(
+                    "⚠️ *Помилка!*\n\n"
+                    "Для запису потрібна реєстрація через спеціальне посилання.\n"
+                    "Зверніться до адміністратора.",
+                    parse_mode="Markdown"
+                )
+                await start(update, context)
+            return
         
         # === ІМ'Я СТУДЕНТА ===
         if state == "waiting_for_name":
@@ -1285,6 +1277,7 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
     name = context.user_data.get("student_name", "")
     phone = context.user_data.get("student_phone", "")
     student_tariff = context.user_data.get("student_tariff", 0)
+    booking_comment = context.user_data.get("booking_comment", "")
     
     # Розрахунок вартості на основі тарифу учня
     if student_tariff > 0:
@@ -1299,42 +1292,40 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
     
     context.user_data["state"] = "waiting_for_confirmation"
     
+    # Формуємо текст
+    text = (
+        f"📋 *Підтвердження запису*\n\n"
+        f"👨‍🏫 Інструктор: {instructor}\n"
+        f"📅 Дата: {date}\n"
+        f"🕐 Час: {time}\n"
+        f"⏱ Тривалість: {duration}\n"
+        f"💰 Вартість: {price:.0f} грн\n"
+    )
+    
+    # Додаємо коментар якщо є
+    if booking_comment:
+        text += f"\n💬 Коментар:\n\"{booking_comment}\"\n"
+    
+    text += "\nВсе вірно?"
+    
+    # Кнопки
     keyboard = [
-        [KeyboardButton("✅ Підтвердити")],
-        [KeyboardButton("🔙 Скасувати")]
+        [KeyboardButton("✅ Підтвердити")]
     ]
     
-    # Перевіряємо хто записує
-    user_id = update.message.from_user.id
-    
-    if is_admin(user_id):
-        # ДЛЯ АДМІНА - З іменем та телефоном
-        await update.message.reply_text(
-            f"📋 *Підтвердження запису*\n\n"
-            f"👤 Учень: {name}\n"
-            f"📱 Телефон: {phone}\n"
-            f"👨‍🏫 Інструктор: {instructor}\n"
-            f"📅 Дата: {date}\n"
-            f"🕐 Час: {time}\n"
-            f"⏱ Тривалість: {duration}\n"
-            f"💰 Вартість: {price:.0f} грн\n\n"
-            f"Все вірно?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-            parse_mode="Markdown"
-        )
+    # Якщо коментар є - показуємо "Змінити", якщо немає - "Додати"
+    if booking_comment:
+        keyboard.append([KeyboardButton("✏️ Змінити коментар")])
     else:
-        # ДЛЯ УЧНЯ - БЕЗ імені та телефону
-        await update.message.reply_text(
-            f"📋 *Підтвердження запису*\n\n"
-            f"👨‍🏫 Інструктор: {instructor}\n"
-            f"📅 Дата: {date}\n"
-            f"🕐 Час: {time}\n"
-            f"⏱ Тривалість: {duration}\n"
-            f"💰 Вартість: {price:.0f} грн\n\n"
-            f"Все вірно?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-            parse_mode="Markdown"
-        )
+        keyboard.append([KeyboardButton("💬 Додати коментар")])
+    
+    keyboard.append([KeyboardButton("🔙 Скасувати")])
+    
+    await update.message.reply_text(
+        text,
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
 
 # ======================= INSTRUCTOR FUNCTIONS =======================
 async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1356,7 +1347,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
             cursor = conn.cursor()
             # Спочатку отримуємо всі активні заняття
             cursor.execute("""
-                SELECT date, time, duration, student_name, student_phone, status
+                SELECT date, time, duration, student_name, student_phone, status, booking_comment
                 FROM lessons
                 WHERE instructor_id = ? 
                 AND status = 'active'
@@ -1367,7 +1358,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
         
         # Фільтруємо майбутні заняття в Python
         lessons = []
-        for date, time, duration, student_name, student_phone, status in all_lessons:
+        for date, time, duration, student_name, student_phone, status, booking_comment in all_lessons:
             try:
                 # Парсимо дату з БД (ДД.ММ.РРРР)
                 lesson_datetime = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
@@ -1375,13 +1366,13 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
                 
                 # Порівнюємо
                 if lesson_datetime >= now:
-                    lessons.append((date, time, duration, student_name, student_phone, status))
+                    lessons.append((date, time, duration, student_name, student_phone, status, booking_comment))
             except:
                 # Якщо не вдалося розпарсити - показуємо всі
-                lessons.append((date, time, duration, student_name, student_phone, status))
+                lessons.append((date, time, duration, student_name, student_phone, status, booking_comment))
         
         # Обмежуємо 20 записами
-        lessons = lessons[:20]
+        lessons = lessons[:100]
         
         if not lessons:
             await update.message.reply_text("📋 У вас поки немає запланованих занять.")
@@ -1390,7 +1381,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
         text = f"📅 *Ваш розклад:*\n\n"
         current_date = None
         
-        for date, time, duration, student_name, student_phone, status in lessons:
+        for date, time, duration, student_name, student_phone, status, booking_comment in lessons:
             if date != current_date:
                 text += f"\n📆 *{date}*\n"
                 current_date = date
@@ -1399,6 +1390,8 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
             text += f"👤 {student_name}\n"
             if student_phone:
                 text += f"📱 {student_phone}\n"
+            if booking_comment:
+                text += f"💬 \"{booking_comment}\"\n"
             text += "\n"
         
         # Додаємо тільки кнопку Назад
@@ -2149,7 +2142,7 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
                 FROM schedule_blocks
                 WHERE instructor_id = ?
                 ORDER BY date, time_start
-                LIMIT 10
+                LIMIT 30
             """, (instructor_id,))
             
             blocks = cursor.fetchall()
@@ -2234,7 +2227,7 @@ async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [KeyboardButton("📊 Звіт по інструкторах")],
         [KeyboardButton("👥 Список інструкторів")],
-        [KeyboardButton("📥 Експорт в Excel")],
+        [KeyboardButton("📥 Імпорт даних"), KeyboardButton("📊 Експорт в Excel")],
         [KeyboardButton("🔙 Назад")]
     ]
     
@@ -2278,6 +2271,8 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
             text += f"{i}. {name} ({transmission})\n"
             text += f"   ID: {telegram_id}\n\n"
         
+        await update.message.reply_text(text)
+        await show_admin_panel(update, context)
         await update.message.reply_text(text)
         await show_admin_panel(update, context)
         return
@@ -2359,7 +2354,7 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT l.date, l.time, l.duration, i.name, i.phone, l.status
+                SELECT l.date, l.time, l.duration, i.name, i.phone, l.status, l.booking_comment
                 FROM lessons l
                 JOIN instructors i ON l.instructor_id = i.id
                 WHERE l.student_telegram_id = ? AND l.status = 'active'
@@ -2375,9 +2370,12 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
         
         text = "📖 Ваші записи:\n\n"
         
-        for date, time, duration, instructor_name, instructor_phone, status in lessons:
+        for date, time, duration, instructor_name, instructor_phone, status, booking_comment in lessons:
             text += f"📅 {date} о {time} ({duration})\n"
-            text += f"👨‍🏫 {instructor_name} | 📱 {instructor_phone}\n\n"
+            text += f"👨‍🏫 {instructor_name} | 📱 {instructor_phone}\n"
+            if booking_comment:
+                text += f"💬 Ваш коментар: \"{booking_comment}\"\n"
+            text += "\n"
         
         await update.message.reply_text(text)
         
@@ -2710,6 +2708,7 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                 else:
                     price = PRICES.get(duration, 400)
                 
+                # Відправка інструктору
                 await context.bot.send_message(
                     chat_id=instructor_telegram_id,
                     text=f"🔔 *Урок скасовано учнем*\n\n"
@@ -2721,6 +2720,32 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                          f"💰 Сума: {price:.0f} грн",
                     parse_mode="Markdown"
                 )
+                logger.info(f"✅ Notification sent to instructor {instructor_telegram_id}")
+                
+                # 🟢 ВІДПРАВКА МЕНЕДЖЕРАМ 🟢
+                logger.info(f"📤 Attempting to notify {len(NOTIFICATION_CHAT_IDS)} managers about lesson cancellation...")
+                for manager_chat_id in NOTIFICATION_CHAT_IDS:
+                    try:
+                        manager_notification = (
+                            f"⚠️ *Скасування уроку*\n\n"
+                            f"👤 Учень: {student_name}\n"
+                            f"📱 Телефон: {student_phone}\n"
+                            f"👨‍🏫 Інструктор: {instructor_name}\n"
+                            f"📅 Дата: {date}\n"
+                            f"🕐 Час: {time}\n"
+                            f"⏱ Тривалість: {duration}\n"
+                            f"💰 Сума: {price:.0f} грн"
+                        )
+                        logger.info(f"📨 Sending to manager {manager_chat_id}...")
+                        await context.bot.send_message(
+                            chat_id=manager_chat_id,
+                            text=manager_notification,
+                            parse_mode="Markdown"
+                        )
+                        logger.info(f"✅ Notification sent to manager {manager_chat_id}")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to notify manager {manager_chat_id}: {e}")
+                
             except Exception as e:
                 logger.error(f"Failed to notify instructor: {e}")
         
@@ -2765,6 +2790,9 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         end_hour = start_hour + lesson_hours
         
         with get_db() as conn:
+            # 🔒 ТРАНЗАКЦІЙНА БЛОКУВАННЯ: Запобігає race condition
+            # Блокує БД від одночасних записів поки не закінчаться всі перевірки
+            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             
             # ПЕРЕВІРКА 1: Чи учень вже має урок в цей час (у будь-якого інструктора)
@@ -2863,13 +2891,57 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
+            # ✅ ПЕРЕВІРКА 4: Чи інструктор вільний на цей час (КРИТИЧНО!)
+            logger.info(f"🔍 Перевірка зайнятості: інструктор_id={instructor_id}, дата={date}, час={time}")
+            cursor.execute("""
+                SELECT student_name, student_telegram_id, time, duration
+                FROM lessons
+                WHERE instructor_id = ? AND date = ? AND status = 'active'
+            """, (instructor_id, date))
+            
+            instructor_lessons = cursor.fetchall()
+            logger.info(f"📊 Знайдено {len(instructor_lessons)} активних уроків у інструктора на {date}")
+            
+            for other_student_name, other_student_id, other_time, other_duration in instructor_lessons:
+                # Якщо це той самий учень - пропускаємо (дозволяємо оновити запис)
+                if other_student_id == student_telegram_id:
+                    logger.info(f"⏭️ Пропускаю: той самий учень (id={other_student_id})")
+                    continue
+                
+                other_start = int(other_time.split(':')[0])
+                if "2" in other_duration:
+                    other_hours = 2
+                elif "1.5" in other_duration:
+                    other_hours = 1.5
+                else:
+                    other_hours = 1
+                other_end = other_start + other_hours
+                
+                # Перевірка перетину часу
+                if not (end_hour <= other_start or start_hour >= other_end):
+                    logger.warning(f"❌ КОНФЛІКТ! Інструктор зайнятий: {other_student_name} має урок о {other_time}")
+                    await update.message.reply_text(
+                        f"❌ *Інструктор зайнятий!*\n\n"
+                        f"На цей час вже записаний інший учень:\n"
+                        f"👤 {other_student_name}\n"
+                        f"📅 {date}\n"
+                        f"🕐 {other_time} ({other_duration})\n\n"
+                        f"Оберіть інший час або дату.",
+                        parse_mode="Markdown"
+                    )
+                    return
+            
+            logger.info(f"✅ Всі перевірки пройдені! Зберігаю урок: {student_name} → {instructor_name}, {date} {time}")
+            
             # ========== ВСІ ПЕРЕВІРКИ ПРОЙШЛИ - ЗБЕРІГАЄМО ==========
+            
+            booking_comment = context.user_data.get("booking_comment", "")
             
             cursor.execute("""
                 INSERT INTO lessons 
-                (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-            """, (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration))
+                (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, status, booking_comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+            """, (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, booking_comment))
             conn.commit()
         
         # Повідомлення учню (БЕЗ особистих даних)
@@ -2892,17 +2964,27 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             price = PRICES.get(duration, 400)
         
         # Повідомлення інструктору (З особистими даними ТА сумою)
+        booking_comment = context.user_data.get("booking_comment", "")
+        
         if instructor_telegram_id:
             try:
+                message_text = (
+                    f"🔔 *Новий запис!*\n\n"
+                    f"👤 Учень: {student_name}\n"
+                    f"📱 Телефон: {student_phone}\n"
+                    f"📅 Дата: {date}\n"
+                    f"🕐 Час: {time}\n"
+                    f"⏱ Тривалість: {duration}\n"
+                    f"💰 Вартість: *{price:.0f} грн*"
+                )
+                
+                # Додаємо коментар якщо є
+                if booking_comment:
+                    message_text += f"\n\n💬 Коментар учня:\n\"{booking_comment}\""
+                
                 await context.bot.send_message(
                     chat_id=instructor_telegram_id,
-                    text=f"🔔 *Новий запис!*\n\n"
-                         f"👤 Учень: {student_name}\n"
-                         f"📱 Телефон: {student_phone}\n"
-                         f"📅 Дата: {date}\n"
-                         f"🕐 Час: {time}\n"
-                         f"⏱ Тривалість: {duration}\n"
-                         f"💰 Вартість: *{price:.0f} грн*",
+                    text=message_text,
                     parse_mode="Markdown"
                 )
             except Exception as e:
@@ -3947,11 +4029,283 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"❌ Помилка при створенні Excel файлу:\n{str(e)}"
         )
 
+# ======================= ОБРОБКА ДОКУМЕНТІВ =======================
+
+# ================= ФУНКЦІЇ ІМПОРТУ З EXCEL =================
+
+async def show_import_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню імпорту даних"""
+    user_id = update.message.from_user.id
+    
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Доступ заборонено.")
+        return
+    
+    keyboard = [
+        [KeyboardButton("📥 Завантажити файл для імпорту")],
+        [KeyboardButton("🔙 Назад в адмін панель")]
+    ]
+    
+    await update.message.reply_text(
+        "📥 *ІМПОРТ ДАНИХ З EXCEL*\n\n"
+        "Завантажте Excel файл для відновлення даних.\n\n"
+        "📋 *Що можна імпортувати:*\n"
+        "• Уроки (lessons)\n"
+        "• Заблоковані часи інструкторів\n"
+        "• Учнів (students)\n\n"
+        "⚠️ *Важливо:*\n"
+        "• Файл має бути в форматі .xlsx\n"
+        "• Структура як в експорті бота\n"
+        "• Дублікати автоматично пропускаються\n\n"
+        "Завантажте файл зараз ↓",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    
+    context.user_data["state"] = "waiting_for_import_file"
+
+
+async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка завантаженого файлу"""
+    user_id = update.message.from_user.id
+    
+    if user_id != ADMIN_ID:
+        return
+    
+    try:
+        document = update.message.document
+        
+        if not document or not document.file_name.endswith(('.xlsx', '.xls')):
+            await update.message.reply_text(
+                "❌ Це не Excel файл!\n\n"
+                "Завантажте файл з розширенням .xlsx або .xls"
+            )
+            return
+        
+        await update.message.reply_text("⏳ Завантажую та обробляю файл...")
+        
+        # Завантажуємо файл
+        file = await context.bot.get_file(document.file_id)
+        file_path = f"/tmp/import_{user_id}_{int(datetime.now().timestamp())}.xlsx"
+        await file.download_to_drive(file_path)
+        
+        # Імпортуємо дані
+        result = await import_from_excel(file_path)
+        
+        # Видаляємо тимчасовий файл
+        try:
+            os.remove(file_path)
+        except:
+            pass
+        
+        # Показуємо результат
+        await update.message.reply_text(result, parse_mode="Markdown")
+        
+        # Очищуємо стан
+        context.user_data.clear()
+        
+        # Повертаємось в адмін панель
+        await show_admin_panel(update, context)
+        
+    except Exception as e:
+        logger.error(f"Error in handle_import_file: {e}", exc_info=True)
+        await update.message.reply_text(
+            f"❌ Помилка при імпорті:\n{str(e)}\n\n"
+            f"Перевірте формат файлу та спробуйте ще раз."
+        )
+        context.user_data.clear()
+
+
+async def import_from_excel(file_path):
+    """Імпорт даних з Excel"""
+    from openpyxl import load_workbook
+    
+    try:
+        wb = load_workbook(file_path)
+        
+        stats = {
+            'lessons': 0,
+            'blocks': 0, 
+            'students': 0,
+            'errors': []
+        }
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # ============ ІМПОРТ УРОКІВ ============
+            if "Уроки" in wb.sheetnames:
+                ws = wb["Уроки"]
+                
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    try:
+                        if not row[1]:  # Якщо немає дати - пропускаємо
+                            continue
+                        
+                        # Розпаковуємо дані
+                        lesson_id, date, time, instructor_name, student_name, phone, tariff, duration, price, status = row[:10]
+                        
+                        # Пропускаємо якщо немає ключових даних
+                        if not all([date, time, student_name]):
+                            continue
+                        
+                        # Якщо інструктор None - пропускаємо
+                        if not instructor_name:
+                            stats['errors'].append(f"Рядок {row_idx}: Немає інструктора")
+                            continue
+                        
+                        # Знаходимо instructor_id
+                        cursor.execute("SELECT id FROM instructors WHERE name = ?", (instructor_name,))
+                        instr = cursor.fetchone()
+                        if not instr:
+                            stats['errors'].append(f"Рядок {row_idx}: Інструктор '{instructor_name}' не знайдений")
+                            continue
+                        instructor_id = instr[0]
+                        
+                        # Перевіряємо чи урок вже існує
+                        cursor.execute("""
+                            SELECT id FROM lessons 
+                            WHERE date = ? AND time = ? AND instructor_id = ? AND student_name = ?
+                        """, (date, time, instructor_id, student_name))
+                        
+                        if cursor.fetchone():
+                            continue  # Урок вже існує - пропускаємо
+                        
+                        # Створюємо урок
+                        cursor.execute("""
+                            INSERT INTO lessons (
+                                date, time, start_time, end_time, duration,
+                                instructor_id, student_telegram_id, student_name,
+                                student_phone, student_tariff, status, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            date, time, time, time, duration or "1 година",
+                            instructor_id, 0,  # telegram_id невідомий
+                            student_name, phone, tariff or 450,
+                            status or 'completed', datetime.now()
+                        ))
+                        
+                        stats['lessons'] += 1
+                        
+                    except Exception as e:
+                        stats['errors'].append(f"Урок {row_idx}: {str(e)}")
+                        continue
+            
+            # ============ ІМПОРТ ЗАБЛОКОВАНИХ ЧАСІВ ============
+            if "Заблоковані часи" in wb.sheetnames:
+                ws = wb["Заблоковані часи"]
+                
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    try:
+                        if not row[0]:  # Немає інструктора
+                            continue
+                        
+                        instructor_name, date_str, start_time, end_time, reason, created = row[:6]
+                        
+                        if not all([instructor_name, date_str, start_time, end_time]):
+                            continue
+                        
+                        # Парсимо дату з формату "Ср 04.03.2026"
+                        parts = date_str.split()
+                        if len(parts) >= 2:
+                            date = parts[1]  # Беремо "04.03.2026"
+                        else:
+                            date = date_str
+                        
+                        # Знаходимо instructor_id
+                        cursor.execute("SELECT id FROM instructors WHERE name = ?", (instructor_name,))
+                        instr = cursor.fetchone()
+                        if not instr:
+                            stats['errors'].append(f"Блок {row_idx}: Інструктор '{instructor_name}' не знайдений")
+                            continue
+                        instructor_id = instr[0]
+                        
+                        # Перевіряємо чи блок вже існує
+                        cursor.execute("""
+                            SELECT id FROM schedule_blocks
+                            WHERE instructor_id = ? AND date = ? AND start_time = ? AND end_time = ?
+                        """, (instructor_id, date, start_time, end_time))
+                        
+                        if cursor.fetchone():
+                            continue  # Вже існує
+                        
+                        # Створюємо блок
+                        cursor.execute("""
+                            INSERT INTO schedule_blocks (
+                                instructor_id, date, start_time, end_time, reason, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?)
+                        """, (instructor_id, date, start_time, end_time, reason or "Не вказано", datetime.now()))
+                        
+                        stats['blocks'] += 1
+                        
+                    except Exception as e:
+                        stats['errors'].append(f"Блок {row_idx}: {str(e)}")
+                        continue
+            
+            # ============ ІМПОРТ УЧНІВ ============
+            if "Учні" in wb.sheetnames:
+                ws = wb["Учні"]
+                
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    try:
+                        if not row[0]:  # Немає імені
+                            continue
+                        
+                        name, phone, tariff = row[:3]
+                        
+                        if not all([name, phone]):
+                            continue
+                        
+                        # Перевіряємо чи учень вже існує
+                        cursor.execute("SELECT id FROM students WHERE phone = ?", (phone,))
+                        
+                        if cursor.fetchone():
+                            continue  # Вже існує
+                        
+                        # Створюємо учня
+                        cursor.execute("""
+                            INSERT INTO students (name, phone, tariff, telegram_id, created_at)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (name, phone, tariff or 450, 0, datetime.now()))
+                        
+                        stats['students'] += 1
+                        
+                    except Exception as e:
+                        stats['errors'].append(f"Учень {row_idx}: {str(e)}")
+                        continue
+            
+            conn.commit()
+        
+        # Формуємо звіт
+        result = "✅ *ІМПОРТ ЗАВЕРШЕНО*\n\n"
+        result += f"📝 Імпортовано уроків: *{stats['lessons']}*\n"
+        result += f"🚫 Імпортовано блоків часу: *{stats['blocks']}*\n"
+        result += f"👥 Імпортовано учнів: *{stats['students']}*\n"
+        
+        if stats['errors']:
+            result += f"\n⚠️ Помилок/пропущено: *{len(stats['errors'])}*\n"
+            if len(stats['errors']) <= 5:
+                result += "\n```\n" + "\n".join(stats['errors'][:5]) + "\n```"
+            else:
+                result += f"\n_(Показано 5 з {len(stats['errors']})_"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Critical import error: {e}", exc_info=True)
+        return f"❌ Критична помилка:\n```\n{str(e)}\n```"
+
+
+
 # ======================= MAIN =======================
 def main():
     try:
-        logger.info("🧪 ТЕСТОВА ВЕРСІЯ БОТА - driving_school_TEST.db")
+        # Встановлюємо DB_NAME в environment для database.py
+        os.environ["DB_NAME"] = DB_NAME
+        
+        logger.info("🚀 PRODUCTION ВЕРСІЯ БОТА")
         logger.info(f"🔑 TOKEN: {TOKEN[:20]}...")
+        logger.info(f"💾 БД: {DB_NAME}")
         
         init_db()
         init_lessons_table()
@@ -3972,13 +4326,15 @@ def main():
 
         # Команди
         app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("register490", register_490))
+        app.add_handler(CommandHandler("register450", register_450))
         app.add_handler(CommandHandler("register550", register_550))
+        app.add_handler(CommandHandler("test_managers", test_managers))  # 🧪 Тестова команда
         
         # Обробники
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
         app.add_handler(MessageHandler(filters.CONTACT, handle_message))
+        app.add_handler(MessageHandler(filters.Document.ALL, handle_message))  # Обробка файлів для імпорту
 
         # Нагадування кожні 30 хв (тільки якщо job_queue існує)
         if app.job_queue:
@@ -3991,8 +4347,8 @@ def main():
         logger.info("🚀 Бот запущено!")
         print("🚀 Бот запущено і слухає...")
         print("\n📝 Посилання для реєстрації учнів:")
-        print(f"   490 грн: https://t.me/InstructorIF2_Test_bot?start=register490")
-        print(f"   550 грн: https://t.me/InstructorIF2_Test_bot?start=register550")
+        print(f"   450 грн: https://t.me/InstructorIFBot?start=register450")
+        print(f"   550 грн: https://t.me/InstructorIFBot?start=register550")
         
         # Запускаємо polling в окремому потоці
         import threading
