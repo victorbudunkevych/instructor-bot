@@ -699,7 +699,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_admin_panel(update, context)
             return
         
-        if text == "📥 Експорт в Excel":
+        if text == "📥 Імпорт даних":
+            await show_import_menu(update, context)
+            return
+        
+        if text == "📊 Експорт в Excel":
             await show_export_period_menu(update, context)
             return
         
@@ -718,6 +722,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if state == "export_custom_period":
             await handle_export_custom_period(update, context)
+            return
+        
+        # === ІМПОРТ ДАНИХ ===
+        if state == "waiting_for_import_file":
+            if update.message.document:
+                await handle_import_file(update, context)
+            elif text == "🔙 Назад в адмін панель":
+                context.user_data.clear()
+                await show_admin_panel(update, context)
+            else:
+                await update.message.reply_text(
+                    "❌ Завантажте Excel файл (.xlsx або .xls)\n\n"
+                    "Або натисніть '🔙 Назад в адмін панель'"
+                )
             return
 
         # === МЕНЮ ІНСТРУКТОРА ===
@@ -2209,7 +2227,7 @@ async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [KeyboardButton("📊 Звіт по інструкторах")],
         [KeyboardButton("👥 Список інструкторів")],
-        [KeyboardButton("📥 Експорт в Excel")],
+        [KeyboardButton("📥 Імпорт даних"), KeyboardButton("📊 Експорт в Excel")],
         [KeyboardButton("🔙 Назад")]
     ]
     
@@ -4012,6 +4030,273 @@ async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # ======================= ОБРОБКА ДОКУМЕНТІВ =======================
+
+# ================= ФУНКЦІЇ ІМПОРТУ З EXCEL =================
+
+async def show_import_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню імпорту даних"""
+    user_id = update.message.from_user.id
+    
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("❌ Доступ заборонено.")
+        return
+    
+    keyboard = [
+        [KeyboardButton("📥 Завантажити файл для імпорту")],
+        [KeyboardButton("🔙 Назад в адмін панель")]
+    ]
+    
+    await update.message.reply_text(
+        "📥 *ІМПОРТ ДАНИХ З EXCEL*\n\n"
+        "Завантажте Excel файл для відновлення даних.\n\n"
+        "📋 *Що можна імпортувати:*\n"
+        "• Уроки (lessons)\n"
+        "• Заблоковані часи інструкторів\n"
+        "• Учнів (students)\n\n"
+        "⚠️ *Важливо:*\n"
+        "• Файл має бути в форматі .xlsx\n"
+        "• Структура як в експорті бота\n"
+        "• Дублікати автоматично пропускаються\n\n"
+        "Завантажте файл зараз ↓",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+    
+    context.user_data["state"] = "waiting_for_import_file"
+
+
+async def handle_import_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка завантаженого файлу"""
+    user_id = update.message.from_user.id
+    
+    if user_id != ADMIN_ID:
+        return
+    
+    try:
+        document = update.message.document
+        
+        if not document or not document.file_name.endswith(('.xlsx', '.xls')):
+            await update.message.reply_text(
+                "❌ Це не Excel файл!\n\n"
+                "Завантажте файл з розширенням .xlsx або .xls"
+            )
+            return
+        
+        await update.message.reply_text("⏳ Завантажую та обробляю файл...")
+        
+        # Завантажуємо файл
+        file = await context.bot.get_file(document.file_id)
+        file_path = f"/tmp/import_{user_id}_{int(datetime.now().timestamp())}.xlsx"
+        await file.download_to_drive(file_path)
+        
+        # Імпортуємо дані
+        result = await import_from_excel(file_path)
+        
+        # Видаляємо тимчасовий файл
+        try:
+            os.remove(file_path)
+        except:
+            pass
+        
+        # Показуємо результат
+        await update.message.reply_text(result, parse_mode="Markdown")
+        
+        # Очищуємо стан
+        context.user_data.clear()
+        
+        # Повертаємось в адмін панель
+        await show_admin_panel(update, context)
+        
+    except Exception as e:
+        logger.error(f"Error in handle_import_file: {e}", exc_info=True)
+        await update.message.reply_text(
+            f"❌ Помилка при імпорті:\n{str(e)}\n\n"
+            f"Перевірте формат файлу та спробуйте ще раз."
+        )
+        context.user_data.clear()
+
+
+async def import_from_excel(file_path):
+    """Імпорт даних з Excel"""
+    from openpyxl import load_workbook
+    
+    try:
+        wb = load_workbook(file_path)
+        
+        stats = {
+            'lessons': 0,
+            'blocks': 0, 
+            'students': 0,
+            'errors': []
+        }
+        
+        with get_db() as conn:
+            cursor = conn.cursor()
+            
+            # ============ ІМПОРТ УРОКІВ ============
+            if "Уроки" in wb.sheetnames:
+                ws = wb["Уроки"]
+                
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    try:
+                        if not row[1]:  # Якщо немає дати - пропускаємо
+                            continue
+                        
+                        # Розпаковуємо дані
+                        lesson_id, date, time, instructor_name, student_name, phone, tariff, duration, price, status = row[:10]
+                        
+                        # Пропускаємо якщо немає ключових даних
+                        if not all([date, time, student_name]):
+                            continue
+                        
+                        # Якщо інструктор None - пропускаємо
+                        if not instructor_name:
+                            stats['errors'].append(f"Рядок {row_idx}: Немає інструктора")
+                            continue
+                        
+                        # Знаходимо instructor_id
+                        cursor.execute("SELECT id FROM instructors WHERE name = ?", (instructor_name,))
+                        instr = cursor.fetchone()
+                        if not instr:
+                            stats['errors'].append(f"Рядок {row_idx}: Інструктор '{instructor_name}' не знайдений")
+                            continue
+                        instructor_id = instr[0]
+                        
+                        # Перевіряємо чи урок вже існує
+                        cursor.execute("""
+                            SELECT id FROM lessons 
+                            WHERE date = ? AND time = ? AND instructor_id = ? AND student_name = ?
+                        """, (date, time, instructor_id, student_name))
+                        
+                        if cursor.fetchone():
+                            continue  # Урок вже існує - пропускаємо
+                        
+                        # Створюємо урок
+                        cursor.execute("""
+                            INSERT INTO lessons (
+                                date, time, start_time, end_time, duration,
+                                instructor_id, student_telegram_id, student_name,
+                                student_phone, student_tariff, status, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            date, time, time, time, duration or "1 година",
+                            instructor_id, 0,  # telegram_id невідомий
+                            student_name, phone, tariff or 450,
+                            status or 'completed', datetime.now()
+                        ))
+                        
+                        stats['lessons'] += 1
+                        
+                    except Exception as e:
+                        stats['errors'].append(f"Урок {row_idx}: {str(e)}")
+                        continue
+            
+            # ============ ІМПОРТ ЗАБЛОКОВАНИХ ЧАСІВ ============
+            if "Заблоковані часи" in wb.sheetnames:
+                ws = wb["Заблоковані часи"]
+                
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    try:
+                        if not row[0]:  # Немає інструктора
+                            continue
+                        
+                        instructor_name, date_str, start_time, end_time, reason, created = row[:6]
+                        
+                        if not all([instructor_name, date_str, start_time, end_time]):
+                            continue
+                        
+                        # Парсимо дату з формату "Ср 04.03.2026"
+                        parts = date_str.split()
+                        if len(parts) >= 2:
+                            date = parts[1]  # Беремо "04.03.2026"
+                        else:
+                            date = date_str
+                        
+                        # Знаходимо instructor_id
+                        cursor.execute("SELECT id FROM instructors WHERE name = ?", (instructor_name,))
+                        instr = cursor.fetchone()
+                        if not instr:
+                            stats['errors'].append(f"Блок {row_idx}: Інструктор '{instructor_name}' не знайдений")
+                            continue
+                        instructor_id = instr[0]
+                        
+                        # Перевіряємо чи блок вже існує
+                        cursor.execute("""
+                            SELECT id FROM schedule_blocks
+                            WHERE instructor_id = ? AND date = ? AND start_time = ? AND end_time = ?
+                        """, (instructor_id, date, start_time, end_time))
+                        
+                        if cursor.fetchone():
+                            continue  # Вже існує
+                        
+                        # Створюємо блок
+                        cursor.execute("""
+                            INSERT INTO schedule_blocks (
+                                instructor_id, date, start_time, end_time, reason, created_at
+                            ) VALUES (?, ?, ?, ?, ?, ?)
+                        """, (instructor_id, date, start_time, end_time, reason or "Не вказано", datetime.now()))
+                        
+                        stats['blocks'] += 1
+                        
+                    except Exception as e:
+                        stats['errors'].append(f"Блок {row_idx}: {str(e)}")
+                        continue
+            
+            # ============ ІМПОРТ УЧНІВ ============
+            if "Учні" in wb.sheetnames:
+                ws = wb["Учні"]
+                
+                for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+                    try:
+                        if not row[0]:  # Немає імені
+                            continue
+                        
+                        name, phone, tariff = row[:3]
+                        
+                        if not all([name, phone]):
+                            continue
+                        
+                        # Перевіряємо чи учень вже існує
+                        cursor.execute("SELECT id FROM students WHERE phone = ?", (phone,))
+                        
+                        if cursor.fetchone():
+                            continue  # Вже існує
+                        
+                        # Створюємо учня
+                        cursor.execute("""
+                            INSERT INTO students (name, phone, tariff, telegram_id, created_at)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (name, phone, tariff or 450, 0, datetime.now()))
+                        
+                        stats['students'] += 1
+                        
+                    except Exception as e:
+                        stats['errors'].append(f"Учень {row_idx}: {str(e)}")
+                        continue
+            
+            conn.commit()
+        
+        # Формуємо звіт
+        result = "✅ *ІМПОРТ ЗАВЕРШЕНО*\n\n"
+        result += f"📝 Імпортовано уроків: *{stats['lessons']}*\n"
+        result += f"🚫 Імпортовано блоків часу: *{stats['blocks']}*\n"
+        result += f"👥 Імпортовано учнів: *{stats['students']}*\n"
+        
+        if stats['errors']:
+            result += f"\n⚠️ Помилок/пропущено: *{len(stats['errors'])}*\n"
+            if len(stats['errors']) <= 5:
+                result += "\n```\n" + "\n".join(stats['errors'][:5]) + "\n```"
+            else:
+                result += f"\n_(Показано 5 з {len(stats['errors']})_"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Critical import error: {e}", exc_info=True)
+        return f"❌ Критична помилка:\n```\n{str(e)}\n```"
+
+
+
 # ======================= MAIN =======================
 def main():
     try:
@@ -4049,6 +4334,7 @@ def main():
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
         app.add_handler(MessageHandler(filters.CONTACT, handle_message))
+        app.add_handler(MessageHandler(filters.Document.ALL, handle_message))  # Обробка файлів для імпорту
 
         # Нагадування кожні 30 хв (тільки якщо job_queue існує)
         if app.job_queue:
