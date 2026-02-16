@@ -16,29 +16,33 @@ def validate_time_format(time_str):
         return False
 
 def validate_date_format(date_str):
-    """Перевірка формату дати YYYY-MM-DD"""
+    """Перевірка формату дати - приймає YYYY-MM-DD або dd.mm.YYYY"""
     try:
+        # Спробуємо YYYY-MM-DD
         datetime.strptime(date_str, '%Y-%m-%d')
         return True
     except ValueError:
-        return False
+        try:
+            # Спробуємо dd.mm.YYYY
+            datetime.strptime(date_str, '%d.%m.%Y')
+            return True
+        except ValueError:
+            return False
 
-# ======================= ПІДКЛЮЧЕННЯ =======================
-@contextmanager
-def get_db():
-    """Context manager для безпечної роботи з БД"""
-    conn = sqlite3.connect("instructors.db")
+def normalize_date(date_str):
+    """Конвертує дату в формат YYYY-MM-DD незалежно від вхідного формату"""
     try:
-        yield conn
-    except Exception as e:
-        conn.rollback()
-        logger.error(f"Database error: {e}")
-        raise
-    finally:
-        conn.close()
-
-# ======================= ІНІЦІАЛІЗАЦІЯ =======================
-def init_db():
+        # Якщо вже в форматі YYYY-MM-DD
+        datetime.strptime(date_str, '%Y-%m-%d')
+        return date_str
+    except ValueError:
+        try:
+            # Конвертуємо з dd.mm.YYYY в YYYY-MM-DD
+            dt = datetime.strptime(date_str, '%d.%m.%Y')
+            return dt.strftime('%Y-%m-%d')
+        except ValueError:
+            logger.error(f"Неправильний формат дати: {date_str}")
+            return None
     """Створення таблиці інструкторів"""
     try:
         with get_db() as conn:
@@ -304,6 +308,11 @@ def add_schedule_block(instructor_id, date, time_start, time_end, block_type, re
         logger.error(f"Невірний формат дати: {date}")
         return False
     
+    # Нормалізуємо дату до YYYY-MM-DD
+    normalized_date = normalize_date(date)
+    if not normalized_date:
+        return False
+    
     if not validate_time_format(time_start) or not validate_time_format(time_end):
         logger.error(f"Невірний формат часу: {time_start} - {time_end}")
         return False
@@ -315,8 +324,9 @@ def add_schedule_block(instructor_id, date, time_start, time_end, block_type, re
                 INSERT INTO schedule_blocks 
                 (instructor_id, date, time_start, time_end, block_type, reason)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (instructor_id, date, time_start, time_end, block_type, reason))
+            """, (instructor_id, normalized_date, time_start, time_end, block_type, reason))
             conn.commit()
+            logger.info(f"✅ Блокування додано: {normalized_date} {time_start}-{time_end}")
             return True
     except Exception as e:
         logger.error(f"Помилка add_schedule_block: {e}")
