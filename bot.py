@@ -2104,8 +2104,8 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
         for block in blocks:
             block_id, date_str, time_start, time_end, reason = block
             try:
-                # Конвертуємо dd.mm.YYYY в date об'єкт
-                block_date = datetime.strptime(date_str, '%d.%m.%Y').date()
+                # Конвертуємо YYYY-MM-DD в date об'єкт
+                block_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                 if block_date >= today_date:
                     future_blocks.append(block)
             except ValueError:
@@ -2176,7 +2176,7 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for block in all_blocks:
             date_str, time_start, time_end, reason = block
             try:
-                block_date = datetime.strptime(date_str, '%d.%m.%Y').date()
+                block_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                 if block_date >= today_date:
                     future_blocks.append(block)
                 else:
@@ -2186,7 +2186,7 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 continue
         
         # Сортуємо майбутні блокування (від найближчих)
-        future_blocks.sort(key=lambda x: datetime.strptime(x[0], '%d.%m.%Y'))
+        future_blocks.sort(key=lambda x: datetime.strptime(x[0], '%Y-%m-%d'))
         # Минулі вже відсортовані DESC
         
         if not future_blocks and not past_blocks:
