@@ -2073,7 +2073,7 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         await manage_schedule(update, context)
 
 async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показати блокування для видалення"""
+    """Показати блокування для видалення (тільки майбутні)"""
     user_id = update.message.from_user.id
     
     try:
@@ -2084,20 +2084,24 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
         
         instructor_id = instructor_data[0]
         
+        # Поточна дата для фільтрації
+        today = datetime.now(TZ).strftime('%d.%m.%Y')
+        
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, date, time_start, time_end, reason
                 FROM schedule_blocks
-                WHERE instructor_id = ?
+                WHERE instructor_id = ? 
+                AND date >= ?
                 ORDER BY date, time_start
                 LIMIT 30
-            """, (instructor_id,))
+            """, (instructor_id, today))
             
             blocks = cursor.fetchall()
         
         if not blocks:
-            await update.message.reply_text("📋 Немає блокувань.")
+            await update.message.reply_text("📋 Немає майбутніх блокувань.")
             return
         
         text = "🟢 *Оберіть блокування для видалення:*\n\n"
@@ -2125,7 +2129,7 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("❌ Помилка.")
 
 async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показати всі блокування"""
+    """Показати всі блокування (з розділенням на майбутні та минулі)"""
     user_id = update.message.from_user.id
     
     try:
@@ -2135,34 +2139,61 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         instructor_id = instructor_data[0]
+        today = datetime.now(TZ).strftime('%d.%m.%Y')
         
         with get_db() as conn:
             cursor = conn.cursor()
+            
+            # Майбутні блокування
             cursor.execute("""
                 SELECT date, time_start, time_end, reason
                 FROM schedule_blocks
-                WHERE instructor_id = ?
+                WHERE instructor_id = ? AND date >= ?
                 ORDER BY date, time_start
-            """, (instructor_id,))
+            """, (instructor_id, today))
+            future_blocks = cursor.fetchall()
             
-            blocks = cursor.fetchall()
+            # Минулі блокування (останні 30)
+            cursor.execute("""
+                SELECT date, time_start, time_end, reason
+                FROM schedule_blocks
+                WHERE instructor_id = ? AND date < ?
+                ORDER BY date DESC, time_start DESC
+                LIMIT 30
+            """, (instructor_id, today))
+            past_blocks = cursor.fetchall()
         
-        if not blocks:
+        if not future_blocks and not past_blocks:
             await update.message.reply_text("📋 У вас немає заблокованих годин.")
             return
         
-        text = "🔴 *Ваші блокування:*\n\n"
-        current_date = None
+        text = ""
         
-        for date, time_start, time_end, reason in blocks:
-            if date != current_date:
-                text += f"\n📅 *{date}*\n"
-                current_date = date
-            
-            text += f"🕐 {time_start} - {time_end}"
-            if reason:
-                text += f" | {reason}"
-            text += "\n"
+        # Майбутні блокування
+        if future_blocks:
+            text += "🟢 *Майбутні блокування:*\n"
+            current_date = None
+            for date, time_start, time_end, reason in future_blocks:
+                if date != current_date:
+                    text += f"\n📅 *{date}*\n"
+                    current_date = date
+                text += f"🕐 {time_start} - {time_end}"
+                if reason:
+                    text += f" | {reason}"
+                text += "\n"
+        
+        # Минулі блокування
+        if past_blocks:
+            text += "\n🔴 *Минулі блокування:*\n"
+            current_date = None
+            for date, time_start, time_end, reason in past_blocks:
+                if date != current_date:
+                    text += f"\n📅 {date}\n"
+                    current_date = date
+                text += f"🕐 {time_start} - {time_end}"
+                if reason:
+                    text += f" | {reason}"
+                text += "\n"
         
         await update.message.reply_text(text, parse_mode="Markdown")
         
