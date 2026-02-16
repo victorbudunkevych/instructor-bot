@@ -2085,29 +2085,42 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
         instructor_id = instructor_data[0]
         
         # Поточна дата для фільтрації
-        today = datetime.now(TZ).strftime('%d.%m.%Y')
+        today_date = datetime.now(TZ).date()
         
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, date, time_start, time_end, reason
                 FROM schedule_blocks
-                WHERE instructor_id = ? 
-                AND date >= ?
+                WHERE instructor_id = ?
                 ORDER BY date, time_start
                 LIMIT 30
-            """, (instructor_id, today))
+            """, (instructor_id,))
             
             blocks = cursor.fetchall()
         
-        if not blocks:
+        # Фільтруємо тільки майбутні блокування (Python-фільтр)
+        future_blocks = []
+        for block in blocks:
+            block_id, date_str, time_start, time_end, reason = block
+            try:
+                # Конвертуємо dd.mm.YYYY в date об'єкт
+                block_date = datetime.strptime(date_str, '%d.%m.%Y').date()
+                if block_date >= today_date:
+                    future_blocks.append(block)
+            except ValueError:
+                # Якщо помилка парсингу - пропускаємо
+                logger.warning(f"⚠️ Неправильний формат дати: {date_str}")
+                continue
+        
+        if not future_blocks:
             await update.message.reply_text("📋 Немає майбутніх блокувань.")
             return
         
         text = "🟢 *Оберіть блокування для видалення:*\n\n"
         buttons = []
         
-        for block_id, date, time_start, time_end, reason in blocks:
+        for block_id, date, time_start, time_end, reason in future_blocks:
             text += f"📅 {date} | 🕐 {time_start}-{time_end}\n"
             if reason:
                 text += f"💬 {reason}\n"
@@ -2139,29 +2152,42 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         instructor_id = instructor_data[0]
-        today = datetime.now(TZ).strftime('%d.%m.%Y')
+        today_date = datetime.now(TZ).date()
         
         with get_db() as conn:
             cursor = conn.cursor()
-            
-            # Майбутні блокування
             cursor.execute("""
                 SELECT date, time_start, time_end, reason
                 FROM schedule_blocks
-                WHERE instructor_id = ? AND date >= ?
-                ORDER BY date, time_start
-            """, (instructor_id, today))
-            future_blocks = cursor.fetchall()
-            
-            # Минулі блокування (останні 30)
-            cursor.execute("""
-                SELECT date, time_start, time_end, reason
-                FROM schedule_blocks
-                WHERE instructor_id = ? AND date < ?
+                WHERE instructor_id = ?
                 ORDER BY date DESC, time_start DESC
-                LIMIT 30
-            """, (instructor_id, today))
-            past_blocks = cursor.fetchall()
+            """, (instructor_id,))
+            
+            all_blocks = cursor.fetchall()
+        
+        if not all_blocks:
+            await update.message.reply_text("📋 У вас немає заблокованих годин.")
+            return
+        
+        # Розділяємо на майбутні та минулі
+        future_blocks = []
+        past_blocks = []
+        
+        for block in all_blocks:
+            date_str, time_start, time_end, reason = block
+            try:
+                block_date = datetime.strptime(date_str, '%d.%m.%Y').date()
+                if block_date >= today_date:
+                    future_blocks.append(block)
+                else:
+                    past_blocks.append(block)
+            except ValueError:
+                logger.warning(f"⚠️ Неправильний формат дати: {date_str}")
+                continue
+        
+        # Сортуємо майбутні блокування (від найближчих)
+        future_blocks.sort(key=lambda x: datetime.strptime(x[0], '%d.%m.%Y'))
+        # Минулі вже відсортовані DESC
         
         if not future_blocks and not past_blocks:
             await update.message.reply_text("📋 У вас немає заблокованих годин.")
@@ -2182,11 +2208,11 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text += f" | {reason}"
                 text += "\n"
         
-        # Минулі блокування
+        # Минулі блокування (останні 30)
         if past_blocks:
             text += "\n🔴 *Минулі блокування:*\n"
             current_date = None
-            for date, time_start, time_end, reason in past_blocks:
+            for date, time_start, time_end, reason in past_blocks[:30]:  # Обмежуємо 30
                 if date != current_date:
                     text += f"\n📅 {date}\n"
                     current_date = date
