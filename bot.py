@@ -2087,31 +2087,20 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
         # Поточна дата для фільтрації
         today_date = datetime.now(TZ).date()
         
+        today_str = today_date.strftime('%Y-%m-%d')
+        
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, date, time_start, time_end, reason
                 FROM schedule_blocks
                 WHERE instructor_id = ?
+                AND date >= ?
                 ORDER BY date, time_start
                 LIMIT 30
-            """, (instructor_id,))
+            """, (instructor_id, today_str))
             
-            blocks = cursor.fetchall()
-        
-        # Фільтруємо тільки майбутні блокування (Python-фільтр)
-        future_blocks = []
-        for block in blocks:
-            block_id, date_str, time_start, time_end, reason = block
-            try:
-                # Конвертуємо YYYY-MM-DD в date об'єкт
-                block_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                if block_date >= today_date:
-                    future_blocks.append(block)
-            except ValueError:
-                # Якщо помилка парсингу - пропускаємо
-                logger.warning(f"⚠️ Неправильний формат дати: {date_str}")
-                continue
+            future_blocks = cursor.fetchall()
         
         if not future_blocks:
             await update.message.reply_text("📋 Немає майбутніх блокувань.")
