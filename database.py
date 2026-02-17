@@ -18,12 +18,10 @@ def validate_time_format(time_str):
 def validate_date_format(date_str):
     """Перевірка формату дати - приймає YYYY-MM-DD або dd.mm.YYYY"""
     try:
-        # Спробуємо YYYY-MM-DD
         datetime.strptime(date_str, '%Y-%m-%d')
         return True
     except ValueError:
         try:
-            # Спробуємо dd.mm.YYYY
             datetime.strptime(date_str, '%d.%m.%Y')
             return True
         except ValueError:
@@ -32,17 +30,39 @@ def validate_date_format(date_str):
 def normalize_date(date_str):
     """Конвертує дату в формат YYYY-MM-DD незалежно від вхідного формату"""
     try:
-        # Якщо вже в форматі YYYY-MM-DD
         datetime.strptime(date_str, '%Y-%m-%d')
         return date_str
     except ValueError:
         try:
-            # Конвертуємо з dd.mm.YYYY в YYYY-MM-DD
             dt = datetime.strptime(date_str, '%d.%m.%Y')
             return dt.strftime('%Y-%m-%d')
         except ValueError:
-            logger.error(f"Неправильний формат дати: {date_str}")
             return None
+
+# ======================= ПІДКЛЮЧЕННЯ =======================
+# Імпортуємо DB_NAME з environment або використовуємо за замовчуванням
+import os
+DB_NAME = os.getenv("DB_NAME", "driving_school.db")
+
+# Перевіряємо чи є Persistent Disk
+if os.path.exists("/var/data") and not DB_NAME.startswith("/var/data"):
+    DB_NAME = f"/var/data/{os.path.basename(DB_NAME)}"
+
+@contextmanager
+def get_db():
+    """Context manager для безпечної роботи з БД"""
+    conn = sqlite3.connect(DB_NAME)
+    try:
+        yield conn
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Database error: {e}")
+        raise
+    finally:
+        conn.close()
+
+# ======================= ІНІЦІАЛІЗАЦІЯ =======================
+def init_db():
     """Створення таблиці інструкторів"""
     try:
         with get_db() as conn:
@@ -311,6 +331,7 @@ def add_schedule_block(instructor_id, date, time_start, time_end, block_type, re
     # Нормалізуємо дату до YYYY-MM-DD
     normalized_date = normalize_date(date)
     if not normalized_date:
+        logger.error(f"Не вдалось нормалізувати дату: {date}")
         return False
     
     if not validate_time_format(time_start) or not validate_time_format(time_end):
