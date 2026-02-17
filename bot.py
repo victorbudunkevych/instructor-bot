@@ -1305,7 +1305,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
             
             all_lessons = cursor.fetchall()
         
-        # Фільтруємо майбутні заняття в Python
+        # Фільтруємо майбутні заняття і сортуємо в Python
         lessons = []
         for date, time, duration, student_name, student_phone, status, booking_comment in all_lessons:
             try:
@@ -1313,15 +1313,17 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
                 lesson_datetime = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
                 lesson_datetime = TZ.localize(lesson_datetime)
                 
-                # Порівнюємо
+                # Порівнюємо - тільки майбутні
                 if lesson_datetime >= now:
-                    lessons.append((date, time, duration, student_name, student_phone, status, booking_comment))
+                    lessons.append((lesson_datetime, date, time, duration, student_name, student_phone, status, booking_comment))
             except:
-                # Якщо не вдалося розпарсити - показуємо всі
-                lessons.append((date, time, duration, student_name, student_phone, status, booking_comment))
+                pass
         
-        # Обмежуємо 20 записами
-        lessons = lessons[:100]
+        # Сортуємо від найближчих до найдальших
+        lessons.sort(key=lambda x: x[0])
+        
+        # Обмежуємо 100 записами і прибираємо datetime об'єкт
+        lessons = [(d, t, dur, sn, sp, st, bc) for (_, d, t, dur, sn, sp, st, bc) in lessons[:100]]
         
         if not lessons:
             await update.message.reply_text("📋 У вас поки немає запланованих занять.")
