@@ -535,32 +535,112 @@ def get_instructor_stats_period(instructor_id, date_from, date_to):
         logger.error(f"Помилка get_instructor_stats_period: {e}")
         return None
 
+def _date_in_range(date_str, date_from, date_to):
+    """Перевіряє чи дата (dd.mm.YYYY або YYYY-MM-DD) входить в діапазон (YYYY-MM-DD)"""
+    try:
+        try:
+            d = datetime.strptime(date_str, '%d.%m.%Y').date()
+        except ValueError:
+            d = datetime.strptime(date_str, '%Y-%m-%d').date()
+        df = datetime.strptime(date_from, '%Y-%m-%d').date()
+        dt = datetime.strptime(date_to, '%Y-%m-%d').date()
+        return df <= d <= dt
+    except:
+        return False
+
 def get_admin_report_by_instructors(date_from, date_to):
-    """НОВА: Звіт для адміна по всіх інструкторах за період"""
+    """Звіт для адміна по всіх інструкторах за період"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # Отримуємо всіх інструкторів
+            cursor.execute("SELECT id, name FROM instructors ORDER BY name")
+            instructors = cursor.fetchall()
+            
+            result = []
+            for inst_id, inst_name in instructors:
+                # Отримуємо всі уроки інструктора
+                cursor.execute("""
+                    SELECT date, duration, status, rating
+                    FROM lessons
+                    WHERE instructor_id = ?
+                    AND status IN ('active', 'completed', 'cancelled')
+                """, (inst_id,))
+                all_lessons = cursor.fetchall()
+                
+                # Фільтруємо по даті в Python
+                lessons_in_range = [l for l in all_lessons if _date_in_range(l[0], date_from, date_to)]
+                
+                total_lessons = len([l for l in lessons_in_range if l[2] != 'cancelled'])
+                cancelled = len([l for l in lessons_in_range if l[2] == 'cancelled'])
+                
+                total_hours = 0
+                ratings = []
+                for _, duration, status, rating in lessons_in_range:
+                    if status != 'cancelled':
+                        if duration and '1.5' in str(duration):
+                            total_hours += 1.5
+                        elif duration and '2' in str(duration):
+                            total_hours += 2
+                        else:
+                            total_hours += 1
+                    if rating:
+                        ratings.append(rating)
+                
+                avg_rating = sum(ratings) / len(ratings) if ratings else 0
+                result.append((inst_name, total_lessons, total_hours, avg_rating, cancelled))
+            
+            # Сортуємо по кількості годин
+            result.sort(key=lambda x: x[2], reverse=True)
+            return result
+    except Exception as e:
+        logger.error(f"Помилка get_admin_report_by_instructors: {e}")
+        return []
+
+def get_instructor_report(instructor_id, date_from, date_to):
+    """Детальний звіт по одному інструктору за період"""
     try:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT 
-                    i.name,
-                    COUNT(l.id) as total_lessons,
-                    SUM(CASE WHEN l.duration LIKE '%1.5%' THEN 1.5
-                             WHEN l.duration LIKE '%2%' THEN 2
-                             ELSE 1 END) as total_hours,
-                    AVG(l.rating) as avg_rating,
-                    SUM(CASE WHEN l.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled
-                FROM instructors i
-                LEFT JOIN lessons l ON i.id = l.instructor_id 
-                    AND l.date BETWEEN ? AND ?
-                    AND l.status IN ('active', 'completed', 'cancelled')
-                GROUP BY i.id, i.name
-                ORDER BY total_hours DESC
-            """, (date_from, date_to))
+                SELECT date, time, duration, student_name, status, rating
+                FROM lessons
+                WHERE instructor_id = ?
+                AND status IN ('active', 'completed', 'cancelled')
+                ORDER BY date, time
+            """, (instructor_id,))
+            all_lessons = cursor.fetchall()
             
-            return cursor.fetchall()
+            lessons_in_range = [l for l in all_lessons if _date_in_range(l[0], date_from, date_to)]
+            
+            total_lessons = len([l for l in lessons_in_range if l[4] != 'cancelled'])
+            cancelled = len([l for l in lessons_in_range if l[4] == 'cancelled'])
+            
+            total_hours = 0
+            ratings = []
+            details = []
+            for date, time, duration, student_name, status, rating in lessons_in_range:
+                hours = 1.5 if duration and '1.5' in str(duration) else (2 if duration and '2' in str(duration) else 1)
+                if status != 'cancelled':
+                    total_hours += hours
+                if rating:
+                    ratings.append(rating)
+                details.append((date, time, hours, student_name, status, rating))
+            
+            avg_rating = sum(ratings) / len(ratings) if ratings else 0
+            earnings = total_hours * 400
+            
+            return {
+                'total_lessons': total_lessons,
+                'total_hours': round(total_hours, 1),
+                'earnings': earnings,
+                'avg_rating': round(avg_rating, 1),
+                'cancelled': cancelled,
+                'details': details
+            }
     except Exception as e:
-        logger.error(f"Помилка get_admin_report_by_instructors: {e}")
-        return []
+        logger.error(f"Помилка get_instructor_report: {e}")
+        return None
 
 # ======================= ЗАПИТИ - УЧНІ =======================
 def register_student(name, phone, telegram_id, tariff, registered_via="direct"):
