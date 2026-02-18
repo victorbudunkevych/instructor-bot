@@ -2752,7 +2752,7 @@ async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_T
                 # Скільки годин до уроку
                 hours_until = (lesson_datetime - now).total_seconds() / 3600
                 
-                if hours_until >= 24:
+                if hours_until >= 12:
                     cancelable_lessons.append((lesson_id, date, time, duration, instructor_name, hours_until))
             except Exception as e:
                 logger.error(f"Error parsing lesson time: {e}")
