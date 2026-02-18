@@ -153,9 +153,20 @@ def is_instructor(telegram_id):
 
 # ======================= HELPERS =======================
 def get_next_dates(days=14, instructor_name=None):
-    """Генерує список дат на найближчі N днів з кількістю вільних годин"""
+    """Генерує список дат на найближчі N днів з кількістю вільних годин
+    
+    Календар оновлюється о 8:00 ранку:
+    - До 8:00 - показує дати починаючи зі вчора
+    - Після 8:00 - показує дати починаючи з сьогодні
+    """
     dates = []
-    today = datetime.now().date()
+    now = datetime.now(TZ)
+    
+    # Якщо зараз до 8:00 ранку - календар ще не оновлений, беремо вчорашню дату
+    if now.hour < 8:
+        today = (now.date() - timedelta(days=1))
+    else:
+        today = now.date()
     
     for i in range(days):
         date = today + timedelta(days=i)
@@ -847,6 +858,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # === ВИБІР КОРОБКИ ===
         if state == "waiting_for_transmission":
+            # Якщо натиснули "Обрати іншого інструктора" - показуємо список
+            if text == "👨‍🏫 Обрати іншого інструктора":
+                transmission = context.user_data.get("transmission")
+                if transmission:
+                    context.user_data["state"] = "waiting_for_instructor"
+                    instructors = get_instructors_by_transmission(transmission)
+                    if not instructors:
+                        await update.message.reply_text("😔 Немає інструкторів для цього типу.")
+                        return
+
+                    keyboard = []
+                    for instructor in instructors:
+                        rating = get_instructor_rating(instructor)
+                        if rating > 0:
+                            stars = "⭐" * int(rating)
+                            keyboard.append([f"{instructor} {stars} ({rating:.1f})"])
+                        else:
+                            keyboard.append([f"{instructor} 🆕"])
+                    
+                    keyboard.append([KeyboardButton("🔙 Назад")])
+                    
+                    await update.message.reply_text(
+                        "👨‍🏫 Оберіть інструктора:",
+                        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                    )
+                    return
+            
             if text not in ["🚗 Автомат", "🚙 Механіка"]:
                 await update.message.reply_text("⚠️ Оберіть коробку передач із меню.")
                 return
