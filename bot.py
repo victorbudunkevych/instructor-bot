@@ -156,17 +156,12 @@ def get_next_dates(days=14, instructor_name=None):
     """Генерує список дат на найближчі N днів з кількістю вільних годин
     
     Календар оновлюється о 8:00 ранку:
-    - До 8:00 - показує дати починаючи зі вчора
-    - Після 8:00 - показує дати починаючи з сьогодні
+    - До 8:00 - показує 14 днів від сьогодні
+    - Після 8:00 - показує 14 днів від сьогодні (з новим 15-м днем)
     """
     dates = []
     now = datetime.now(TZ)
-    
-    # Якщо зараз до 8:00 ранку - календар ще не оновлений, беремо вчорашню дату
-    if now.hour < 8:
-        today = (now.date() - timedelta(days=1))
-    else:
-        today = now.date()
+    today = now.date()  # Завжди сьогодні, без вчорашніх дат
     
     for i in range(days):
         date = today + timedelta(days=i)
@@ -684,6 +679,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if state == "admin_panel":
             await handle_admin_report(update, context)
+            return
+        
+        if state == "admin_manage_bookings":
+            await handle_admin_manage_bookings(update, context)
+            return
+        
+        if state == "admin_cancel_select_date":
+            await handle_admin_cancel_select_date(update, context)
+            return
+        
+        if state == "admin_cancel_select_lesson":
+            await handle_admin_cancel_select_lesson(update, context)
             return
         
         if state == "admin_select_instructor_report":
@@ -2290,6 +2297,7 @@ async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton("📊 Звіт по інструкторах")],
         [KeyboardButton("👤 Звіт по інструктору")],
         [KeyboardButton("👥 Список інструкторів")],
+        [KeyboardButton("✏️ Управління записами")],
         [KeyboardButton("📥 Експорт в Excel")],
         [KeyboardButton("🔙 Назад")]
     ]
@@ -2308,6 +2316,18 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "🔙 Назад":
         context.user_data.clear()  # Очищаємо стан
         await start(update, context)  # Повертаємось в головне меню
+        return
+    
+    if text == "✏️ Управління записами":
+        keyboard = [
+            [KeyboardButton("❌ Скасувати запис учня")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        context.user_data["state"] = "admin_manage_bookings"
+        await update.message.reply_text(
+            "✏️ Управління записами\n\nОберіть дію:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
         return
     
     if text == "👤 Звіт по інструктору":
@@ -2554,6 +2574,190 @@ async def generate_admin_report(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Error in generate_admin_report: {e}", exc_info=True)
         await update.message.reply_text("❌ Помилка генерації звіту.")
 
+# ======================= ADMIN MANAGE BOOKINGS =======================
+async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка меню управління записами"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        await show_admin_panel(update, context)
+        return
+    
+    if text == "❌ Скасувати запис учня":
+        # Генеруємо дати на 30 днів (майбутнє + минуле)
+        today = datetime.now(TZ).date()
+        dates_with_lessons = []
+        
+        # Перевіряємо дати від -7 днів до +30 днів
+        for i in range(-7, 31):
+            date = today + timedelta(days=i)
+            date_str = date.strftime('%d.%m.%Y')
+            
+            # Рахуємо кількість активних уроків на цю дату
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT COUNT(*) FROM lessons 
+                    WHERE date = ? AND status = 'active'
+                """, (date_str,))
+                count = cursor.fetchone()[0]
+            
+            if count > 0:
+                weekday = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"][date.weekday()]
+                formatted = f"{weekday} {date.strftime('%d.%m')} ({count} уроків)"
+                dates_with_lessons.append((date_str, formatted))
+        
+        if not dates_with_lessons:
+            await update.message.reply_text("📋 Немає активних записів на найближчі дні.")
+            await show_admin_panel(update, context)
+            return
+        
+        # Показуємо дати
+        keyboard = []
+        for date_str, formatted in dates_with_lessons[:20]:  # Максимум 20 дат
+            keyboard.append([KeyboardButton(formatted)])
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        context.user_data["state"] = "admin_cancel_select_date"
+        context.user_data["dates_map"] = {formatted: date_str for date_str, formatted in dates_with_lessons}
+        
+        await update.message.reply_text(
+            "📅 Оберіть дату для перегляду уроків:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+
+async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору дати для скасування"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        keyboard = [
+            [KeyboardButton("❌ Скасувати запис учня")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        context.user_data["state"] = "admin_manage_bookings"
+        await update.message.reply_text(
+            "✏️ Управління записами\n\nОберіть дію:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    # Витягуємо дату з формату "Пн 18.02 (5 уроків)"
+    dates_map = context.user_data.get("dates_map", {})
+    date_str = dates_map.get(text)
+    
+    if not date_str:
+        await update.message.reply_text("❌ Невірна дата. Оберіть зі списку.")
+        return
+    
+    # Отримуємо всі уроки на цю дату
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT l.id, l.time, l.duration, l.student_name, l.student_phone, i.name
+            FROM lessons l
+            JOIN instructors i ON l.instructor_id = i.id
+            WHERE l.date = ? AND l.status = 'active'
+            ORDER BY l.time
+        """, (date_str,))
+        lessons = cursor.fetchall()
+    
+    if not lessons:
+        await update.message.reply_text("📋 Немає активних уроків на цю дату.")
+        return
+    
+    # Формуємо список уроків
+    message = f"📅 {date_str} - Активні уроки:\n\n"
+    keyboard = []
+    
+    for idx, (lesson_id, time, duration, student_name, student_phone, instructor_name) in enumerate(lessons, 1):
+        message += f"{idx}️⃣ {time} - {student_name}\n"
+        message += f"   👨‍🏫 {instructor_name}\n"
+        message += f"   ⏱ {duration}\n"
+        if student_phone:
+            message += f"   📱 {student_phone}\n"
+        message += "   ──────────────────────\n"
+        
+        keyboard.append([KeyboardButton(f"{idx}️⃣")])
+    
+    keyboard.append([KeyboardButton("🔙 Назад")])
+    
+    context.user_data["state"] = "admin_cancel_select_lesson"
+    context.user_data["lessons_on_date"] = {str(idx): lesson_id for idx, (lesson_id, *_) in enumerate(lessons, 1)}
+    context.user_data["selected_date"] = date_str
+    
+    await update.message.reply_text(
+        message + "\n💡 Оберіть номер уроку для скасування:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
+async def handle_admin_cancel_select_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка скасування конкретного уроку"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "admin_cancel_select_date"
+        # Повертаємось до вибору дати - показуємо попередній список
+        await update.message.reply_text("📅 Оберіть іншу дату:")
+        return
+    
+    # Витягуємо номер (1️⃣ → "1")
+    lesson_num = text.replace("️⃣", "")
+    lessons_on_date = context.user_data.get("lessons_on_date", {})
+    lesson_id = lessons_on_date.get(lesson_num)
+    
+    if not lesson_id:
+        await update.message.reply_text("❌ Невірний номер. Оберіть зі списку.")
+        return
+    
+    # Отримуємо деталі уроку
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT l.student_name, l.student_phone, l.date, l.time, l.duration, i.name, l.telegram_student_id
+            FROM lessons l
+            JOIN instructors i ON l.instructor_id = i.id
+            WHERE l.id = ?
+        """, (lesson_id,))
+        lesson = cursor.fetchone()
+    
+    if not lesson:
+        await update.message.reply_text("❌ Урок не знайдено.")
+        return
+    
+    student_name, student_phone, date, time, duration, instructor_name, student_telegram_id = lesson
+    
+    # Скасовуємо урок
+    try:
+        cancel_lesson(lesson_id)
+        
+        # Відправляємо повідомлення учню
+        if student_telegram_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=student_telegram_id,
+                    text=f"😔 Вибачте, ваш урок на {date} о {time} з інструктором {instructor_name} "
+                         f"скасовано адміністратором.\n\n"
+                         f"Зв'яжіться з нами для перенесення:\n📞 +380XXXXXXXXX"
+                )
+            except Exception as e:
+                logger.error(f"Не вдалось відправити повідомлення учню {student_telegram_id}: {e}")
+        
+        await update.message.reply_text(
+            f"✅ Урок скасовано!\n\n"
+            f"👤 Учень: {student_name}\n"
+            f"👨‍🏫 Інструктор: {instructor_name}\n"
+            f"📅 {date} {time}\n"
+            f"⏱ {duration}\n\n"
+            f"{'📱 Учня сповіщено' if student_telegram_id else '⚠️ Учень НЕ має Telegram - зателефонуйте: ' + (student_phone or 'номер невідомий')}"
+        )
+        
+        await show_admin_panel(update, context)
+        
+    except Exception as e:
+        logger.error(f"Error cancelling lesson: {e}")
+        await update.message.reply_text("❌ Помилка при скасуванні уроку.")
+
 # ======================= STUDENT FUNCTIONS =======================
 async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показати записи студента"""
@@ -2740,7 +2944,7 @@ async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("📋 У вас немає активних записів на заняття.")
             return
         
-        # Фільтруємо уроки - залишаємо тільки ті що >24 години
+        # Фільтруємо уроки - залишаємо тільки ті що >12 годин
         cancelable_lessons = []
         
         for lesson_id, date, time, duration, instructor_name in lessons:
@@ -2761,7 +2965,7 @@ async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_T
         if not cancelable_lessons:
             await update.message.reply_text(
                 "⚠️ Немає уроків які можна скасувати\n\n"
-                "Скасування можливе мінімум за 24 години до уроку."
+                "Скасування можливе мінімум за 12 годин до уроку."
             )
             return
         
