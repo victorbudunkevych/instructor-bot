@@ -2874,7 +2874,7 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
                     chat_id=student_telegram_id,
                     text=f"😔 Вибачте, ваш урок на {date} о {time} з інструктором {instructor_name} "
                          f"скасовано адміністратором.\n\n"
-                         f"Зв'яжіться з нами для перенесення:\n📞 +380671234567"
+                         f"Зв'яжіться з нами для перенесення:\n📞 +380677499988\n📞 +380677499988"
                 )
             except Exception as e:
                 logger.error(f"Не вдалось відправити повідомлення учню {student_telegram_id}: {e}")
