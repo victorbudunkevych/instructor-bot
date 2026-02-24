@@ -1202,24 +1202,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Рахуємо години на цей тиждень
                 with get_db() as conn:
                     cursor = conn.cursor()
-                    cursor.execute("""
-                        SELECT SUM(CASE 
-                            WHEN duration LIKE '%2%' THEN 2
-                            WHEN duration LIKE '%1.5%' THEN 1.5
-                            ELSE 1
-                        END) as total_hours
-                        FROM lessons
-                        WHERE telegram_student_id = ? 
-                        AND status = 'active'
-                    """, (user.id,))
-                    result = cursor.fetchone()
-                    hours_this_week = 0
                     
                     # Фільтруємо по тижню в Python
                     cursor.execute("""
                         SELECT date, duration
                         FROM lessons
-                        WHERE telegram_student_id = ? AND status = 'active'
+                        WHERE student_telegram_id = ? AND status = 'active'
                     """, (user.id,))
                     all_lessons = cursor.fetchall()
                     
