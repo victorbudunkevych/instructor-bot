@@ -1183,6 +1183,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             student = get_student_by_telegram_id(user.id)
             
             if student:
+                # Перевіряємо ліміт 6 годин на тиждень
+                student_id = student[0]
+                selected_date = context.user_data["date"]
+                selected_duration = text
+                
+                # Конвертуємо тривалість в години
+                duration_hours = 2 if "2" in selected_duration else 1
+                
+                # Отримуємо дату уроку
+                lesson_date = datetime.strptime(selected_date, "%d.%m.%Y")
+                
+                # Початок тижня (понеділок)
+                week_start = lesson_date - timedelta(days=lesson_date.weekday())
+                # Кінець тижня (неділя)
+                week_end = week_start + timedelta(days=6)
+                
+                # Рахуємо години на цей тиждень
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        SELECT SUM(CASE 
+                            WHEN duration LIKE '%2%' THEN 2
+                            WHEN duration LIKE '%1.5%' THEN 1.5
+                            ELSE 1
+                        END) as total_hours
+                        FROM lessons
+                        WHERE telegram_student_id = ? 
+                        AND status = 'active'
+                    """, (user.id,))
+                    result = cursor.fetchone()
+                    hours_this_week = 0
+                    
+                    # Фільтруємо по тижню в Python
+                    cursor.execute("""
+                        SELECT date, duration
+                        FROM lessons
+                        WHERE telegram_student_id = ? AND status = 'active'
+                    """, (user.id,))
+                    all_lessons = cursor.fetchall()
+                    
+                    for lesson_date_str, lesson_duration in all_lessons:
+                        try:
+                            ld = datetime.strptime(lesson_date_str, "%d.%m.%Y")
+                            if week_start <= ld <= week_end:
+                                if "2" in str(lesson_duration):
+                                    hours_this_week += 2
+                                elif "1.5" in str(lesson_duration):
+                                    hours_this_week += 1.5
+                                else:
+                                    hours_this_week += 1
+                        except:
+                            pass
+                
+                # Перевіряємо чи не перевищить ліміт
+                if hours_this_week + duration_hours > 6:
+                    remaining = 6 - hours_this_week
+                    await update.message.reply_text(
+                        f"⚠️ Перевищено ліміт!\n\n"
+                        f"На цей тиждень у вас вже заброньовано {hours_this_week:.1f} год.\n"
+                        f"Ліміт: 6 годин на тиждень\n"
+                        f"Доступно: {remaining:.1f} год.\n\n"
+                        f"Оберіть інший тиждень або зменшіть тривалість."
+                    )
+                    return
+                
                 # Учень зареєстрований - показуємо підтвердження
                 context.user_data["student_name"] = student[1]
                 context.user_data["student_phone"] = student[2]
@@ -2666,17 +2731,24 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
         await update.message.reply_text("📋 Немає активних уроків на цю дату.")
         return
     
-    # Формуємо список уроків
-    message = f"📅 {date_str} - Активні уроки:\n\n"
+    # Обмежуємо 15 уроками (щоб не перевищити ліміт Telegram)
+    MAX_LESSONS = 15
+    total_lessons = len(lessons)
+    
+    if total_lessons > MAX_LESSONS:
+        lessons = lessons[:MAX_LESSONS]
+        warning = f"\n⚠️ Показано перших {MAX_LESSONS} з {total_lessons} уроків"
+    else:
+        warning = ""
+    
+    # Формуємо список уроків (коротко)
+    message = f"📅 {date_str} - Активні уроки ({total_lessons}):\n\n"
     keyboard = []
     
     for idx, (lesson_id, time, duration, student_name, student_phone, instructor_name) in enumerate(lessons, 1):
-        message += f"{idx}️⃣ {time} - {student_name}\n"
+        # Коротший формат
+        message += f"{idx}️⃣ {time} {student_name[:15]}\n"
         message += f"   👨‍🏫 {instructor_name}\n"
-        message += f"   ⏱ {duration}\n"
-        if student_phone:
-            message += f"   📱 {student_phone}\n"
-        message += "   ──────────────────────\n"
         
         keyboard.append([KeyboardButton(f"{idx}️⃣")])
     
@@ -2687,7 +2759,7 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
     context.user_data["selected_date"] = date_str
     
     await update.message.reply_text(
-        message + "\n💡 Оберіть номер уроку для скасування:",
+        message + warning + "\n\n💡 Оберіть номер уроку:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
