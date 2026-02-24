@@ -689,6 +689,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_admin_cancel_select_date(update, context)
             return
         
+        if state == "admin_cancel_select_instructor":
+            await handle_admin_cancel_select_instructor(update, context)
+            return
+        
         if state == "admin_cancel_select_lesson":
             await handle_admin_cancel_select_lesson(update, context)
             return
@@ -2681,7 +2685,7 @@ async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEF
         )
 
 async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка вибору дати для скасування"""
+    """Обробка вибору дати для скасування - показує інструкторів"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -2704,40 +2708,103 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
         await update.message.reply_text("❌ Невірна дата. Оберіть зі списку.")
         return
     
-    # Отримуємо всі уроки на цю дату
+    # Зберігаємо обрану дату
+    context.user_data["selected_date"] = date_str
+    
+    # Отримуємо список інструкторів з уроками на цю дату
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT l.id, l.time, l.duration, l.student_name, l.student_phone, i.name
+            SELECT i.name, COUNT(*) as lesson_count
             FROM lessons l
             JOIN instructors i ON l.instructor_id = i.id
             WHERE l.date = ? AND l.status = 'active'
-            ORDER BY l.time
+            GROUP BY i.name
+            ORDER BY i.name
         """, (date_str,))
-        lessons = cursor.fetchall()
+        instructors = cursor.fetchall()
     
-    if not lessons:
+    if not instructors:
         await update.message.reply_text("📋 Немає активних уроків на цю дату.")
         return
     
-    # Обмежуємо 15 уроками (щоб не перевищити ліміт Telegram)
-    MAX_LESSONS = 15
-    total_lessons = len(lessons)
+    # Формуємо меню з інструкторами
+    keyboard = []
+    total_lessons = sum(count for _, count in instructors)
     
-    if total_lessons > MAX_LESSONS:
-        lessons = lessons[:MAX_LESSONS]
-        warning = f"\n⚠️ Показано перших {MAX_LESSONS} з {total_lessons} уроків"
+    for instructor_name, lesson_count in instructors:
+        keyboard.append([KeyboardButton(f"👨‍🏫 {instructor_name} ({lesson_count})")])
+    
+    # Додаємо опцію "Всі уроки" якщо їх <= 15
+    if total_lessons <= 15:
+        keyboard.append([KeyboardButton("📋 Всі уроки")])
+    
+    keyboard.append([KeyboardButton("🔙 Назад")])
+    
+    context.user_data["state"] = "admin_cancel_select_instructor"
+    
+    await update.message.reply_text(
+        f"📅 {date_str} ({total_lessons} уроків)\n\nОберіть інструктора:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    )
+
+async def handle_admin_cancel_select_instructor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору інструктора - показує його уроки"""
+    text = update.message.text
+    date_str = context.user_data.get("selected_date")
+    
+    if text == "🔙 Назад":
+        # Повертаємось до вибору дати
+        context.user_data["state"] = "admin_cancel_select_date"
+        await update.message.reply_text("📅 Оберіть іншу дату:")
+        return
+    
+    # Отримуємо уроки
+    if text == "📋 Всі уроки":
+        # Показуємо всі уроки
+        instructor_filter = None
     else:
-        warning = ""
+        # Витягуємо ім'я інструктора з "👨‍🏫 Рекетчук Богдан (12)"
+        instructor_name = text.replace("👨‍🏫 ", "").split(" (")[0].strip()
+        instructor_filter = instructor_name
     
-    # Формуємо список уроків (коротко)
-    message = f"📅 {date_str} - Активні уроки ({total_lessons}):\n\n"
+    # Отримуємо уроки
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if instructor_filter:
+            cursor.execute("""
+                SELECT l.id, l.time, l.duration, l.student_name, l.student_phone, i.name
+                FROM lessons l
+                JOIN instructors i ON l.instructor_id = i.id
+                WHERE l.date = ? AND l.status = 'active' AND i.name = ?
+                ORDER BY l.time
+            """, (date_str, instructor_filter))
+        else:
+            cursor.execute("""
+                SELECT l.id, l.time, l.duration, l.student_name, l.student_phone, i.name
+                FROM lessons l
+                JOIN instructors i ON l.instructor_id = i.id
+                WHERE l.date = ? AND l.status = 'active'
+                ORDER BY l.time
+            """, (date_str,))
+        lessons = cursor.fetchall()
+    
+    if not lessons:
+        await update.message.reply_text("📋 Немає уроків для цього інструктора.")
+        return
+    
+    # Формуємо список уроків
+    message = f"📅 {date_str}"
+    if instructor_filter:
+        message += f" - {instructor_filter}"
+    message += f" ({len(lessons)} уроків):\n\n"
+    
     keyboard = []
     
     for idx, (lesson_id, time, duration, student_name, student_phone, instructor_name) in enumerate(lessons, 1):
-        # Коротший формат
         message += f"{idx}️⃣ {time} {student_name[:15]}\n"
-        message += f"   👨‍🏫 {instructor_name}\n"
+        if not instructor_filter:  # Якщо всі інструктори - показуємо ім'я
+            message += f"   👨‍🏫 {instructor_name}\n"
         
         keyboard.append([KeyboardButton(f"{idx}️⃣")])
     
@@ -2745,10 +2812,9 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
     
     context.user_data["state"] = "admin_cancel_select_lesson"
     context.user_data["lessons_on_date"] = {str(idx): lesson_id for idx, (lesson_id, *_) in enumerate(lessons, 1)}
-    context.user_data["selected_date"] = date_str
     
     await update.message.reply_text(
-        message + warning + "\n\n💡 Оберіть номер уроку:",
+        message + "\n💡 Оберіть номер уроку:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
@@ -2757,9 +2823,9 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
     text = update.message.text
     
     if text == "🔙 Назад":
-        context.user_data["state"] = "admin_cancel_select_date"
-        # Повертаємось до вибору дати - показуємо попередній список
-        await update.message.reply_text("📅 Оберіть іншу дату:")
+        context.user_data["state"] = "admin_cancel_select_instructor"
+        # Повертаємось до вибору інструктора
+        await update.message.reply_text("👨‍🏫 Оберіть іншого інструктора:")
         return
     
     # Витягуємо номер (1️⃣ → "1")
