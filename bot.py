@@ -2856,7 +2856,16 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
     
     # Скасовуємо урок
     try:
-        cancel_lesson(lesson_id)
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE lessons
+                SET status = 'cancelled',
+                    cancelled_by = 'admin',
+                    cancelled_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (lesson_id,))
+            conn.commit()
         
         # Відправляємо повідомлення учню
         if student_telegram_id:
@@ -2865,7 +2874,7 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
                     chat_id=student_telegram_id,
                     text=f"😔 Вибачте, ваш урок на {date} о {time} з інструктором {instructor_name} "
                          f"скасовано адміністратором.\n\n"
-                         f"Зв'яжіться з нами для перенесення:\n📞 +380XXXXXXXXX"
+                         f"Зв'яжіться з нами для перенесення:\n📞 +380671234567"
                 )
             except Exception as e:
                 logger.error(f"Не вдалось відправити повідомлення учню {student_telegram_id}: {e}")
