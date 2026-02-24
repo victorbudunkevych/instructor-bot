@@ -2841,7 +2841,7 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT l.student_name, l.student_phone, l.date, l.time, l.duration, i.name, l.telegram_student_id
+            SELECT l.student_name, l.student_phone, l.date, l.time, l.duration, i.name, l.student_telegram_id
             FROM lessons l
             JOIN instructors i ON l.instructor_id = i.id
             WHERE l.id = ?
