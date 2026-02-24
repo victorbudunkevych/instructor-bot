@@ -1211,6 +1211,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     """, (user.id,))
                     all_lessons = cursor.fetchall()
                     
+                    hours_this_week = 0  # Ініціалізуємо
                     for lesson_date_str, lesson_duration in all_lessons:
                         try:
                             ld = datetime.strptime(lesson_date_str, "%d.%m.%Y")
