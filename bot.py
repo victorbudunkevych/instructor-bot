@@ -68,6 +68,21 @@ from database import (
 )
 
 # ======================= HELPER FUNCTIONS =======================
+def get_student_by_phone(phone):
+    """Знайти учня за номером телефону"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, name, phone, student_tariff, transmission
+                FROM students
+                WHERE phone = ?
+            """, (phone,))
+            return cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Error in get_student_by_phone: {e}")
+        return None
+
 def add_instructor_rating(lesson_id, rating, feedback=""):
     """Додати оцінку та коментар інструктора для учня"""
     try:
@@ -695,6 +710,47 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if state == "admin_cancel_select_lesson":
             await handle_admin_cancel_select_lesson(update, context)
+            return
+        
+        # === РУЧНИЙ ЗАПИС УЧНЯ АДМІНОМ ===
+        if state == "admin_manual_enter_phone":
+            await handle_admin_manual_enter_phone(update, context)
+            return
+        
+        if state == "admin_manual_confirm_student":
+            await handle_admin_manual_confirm_student(update, context)
+            return
+        
+        if state == "admin_manual_enter_name":
+            await handle_admin_manual_enter_name(update, context)
+            return
+        
+        if state == "admin_manual_select_tariff":
+            await handle_admin_manual_select_tariff(update, context)
+            return
+        
+        if state == "admin_manual_select_transmission":
+            await handle_admin_manual_select_transmission(update, context)
+            return
+        
+        if state == "admin_manual_select_instructor":
+            await handle_admin_manual_select_instructor(update, context)
+            return
+        
+        if state == "admin_manual_select_date":
+            await handle_admin_manual_select_date(update, context)
+            return
+        
+        if state == "admin_manual_select_time":
+            await handle_admin_manual_select_time(update, context)
+            return
+        
+        if state == "admin_manual_select_duration":
+            await handle_admin_manual_select_duration(update, context)
+            return
+        
+        if state == "admin_manual_confirm":
+            await handle_admin_manual_confirm(update, context)
             return
         
         if state == "admin_select_instructor_report":
@@ -2641,6 +2697,19 @@ async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEF
         await show_admin_panel(update, context)
         return
     
+    if text == "➕ Записати учня вручну":
+        context.user_data["state"] = "admin_manual_enter_phone"
+        context.user_data["admin_booking"] = {}  # Очищаємо дані
+        
+        await update.message.reply_text(
+            "📱 *Крок 1/7: Телефон учня*\n\n"
+            "Введіть номер телефону:\n"
+            "Формат: +380501234567 або 0501234567",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        return
+    
     if text == "❌ Скасувати запис учня":
         # Генеруємо дати на 30 днів (майбутнє + минуле)
         today = datetime.now(TZ).date()
@@ -2691,6 +2760,7 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
     if text == "🔙 Назад":
         keyboard = [
             [KeyboardButton("❌ Скасувати запис учня")],
+            [KeyboardButton("➕ Записати учня вручну")],
             [KeyboardButton("🔙 Назад")]
         ]
         context.user_data["state"] = "admin_manage_bookings"
@@ -2874,7 +2944,7 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
                     chat_id=student_telegram_id,
                     text=f"😔 Вибачте, ваш урок на {date} о {time} з інструктором {instructor_name} "
                          f"скасовано адміністратором.\n\n"
-                         f"Зв'яжіться з нами для перенесення:\n📞 +380677499988\n📞 +380505475557"
+                         f"Зв'яжіться з нами для перенесення:\n📞 +380671234567"
                 )
             except Exception as e:
                 logger.error(f"Не вдалось відправити повідомлення учню {student_telegram_id}: {e}")
@@ -2893,6 +2963,468 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
     except Exception as e:
         logger.error(f"Error cancelling lesson: {e}")
         await update.message.reply_text("❌ Помилка при скасуванні уроку.")
+
+# ======================= ADMIN MANUAL BOOKING =======================
+async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 1: Введення телефону"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        keyboard = [
+            [KeyboardButton("❌ Скасувати запис учня")],
+            [KeyboardButton("➕ Записати учня вручну")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        context.user_data["state"] = "admin_manage_bookings"
+        await update.message.reply_text(
+            "✏️ Управління записами\n\nОберіть дію:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    # Нормалізуємо телефон
+    phone = text.strip()
+    if phone.startswith("0"):
+        phone = "+38" + phone
+    elif not phone.startswith("+"):
+        phone = "+" + phone
+    
+    # Перевірка формату
+    if not re.match(r'^\+380\d{9}$', phone):
+        await update.message.reply_text(
+            "❌ Невірний формат!\n\n"
+            "Використайте:\n"
+            "+380501234567 або 0501234567"
+        )
+        return
+    
+    # Зберігаємо телефон
+    context.user_data["admin_booking"]["phone"] = phone
+    
+    # Шукаємо учня в БД
+    student = get_student_by_phone(phone)
+    
+    if student:
+        # Учень знайдений
+        student_id, name, student_phone, tariff, transmission = student
+        context.user_data["admin_booking"]["name"] = name
+        context.user_data["admin_booking"]["tariff"] = tariff
+        context.user_data["admin_booking"]["transmission"] = transmission
+        context.user_data["admin_booking"]["existing_student"] = True
+        
+        keyboard = [
+            [KeyboardButton("✅ Так, це той учень")],
+            [KeyboardButton("✏️ Ні, ввести дані вручну")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        
+        await update.message.reply_text(
+            f"✅ *Знайдено учня:*\n\n"
+            f"👤 Ім'я: {name}\n"
+            f"📱 Телефон: {phone}\n"
+            f"🚗 Коробка: {transmission}\n"
+            f"💰 Тариф: {tariff} грн/год\n\n"
+            f"Підтвердити?",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        context.user_data["state"] = "admin_manual_confirm_student"
+    else:
+        # Учень не знайдений - просимо ввести ім'я
+        context.user_data["admin_booking"]["existing_student"] = False
+        context.user_data["state"] = "admin_manual_enter_name"
+        
+        await update.message.reply_text(
+            f"❌ *Учня не знайдено*\n\n"
+            f"📱 Телефон: {phone}\n\n"
+            f"📝 *Крок 2/7: Ім'я учня*\n"
+            f"Введіть ім'я та прізвище:",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+
+async def handle_admin_manual_confirm_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Підтвердження знайденого учня"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "admin_manual_enter_phone"
+        await update.message.reply_text(
+            "📱 Введіть номер телефону:",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
+        )
+        return
+    
+    if text == "✅ Так, це той учень":
+        # Переходимо до вибору інструктора (коробка вже відома)
+        transmission = context.user_data["admin_booking"]["transmission"]
+        instructors = get_instructors_by_transmission(transmission)
+        
+        if not instructors:
+            await update.message.reply_text("😔 Немає інструкторів для цього типу.")
+            return
+        
+        keyboard = []
+        for instructor in instructors:
+            rating = get_instructor_rating(instructor)
+            if rating > 0:
+                stars = "⭐" * int(rating)
+                keyboard.append([KeyboardButton(f"{instructor} {stars} ({rating:.1f})")])
+            else:
+                keyboard.append([KeyboardButton(f"{instructor} 🆕")])
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        context.user_data["state"] = "admin_manual_select_instructor"
+        await update.message.reply_text(
+            f"🚗 *Крок 3/7: Інструктор*\n\n"
+            f"Коробка: {transmission}\n"
+            f"Оберіть інструктора:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+    elif text == "✏️ Ні, ввести дані вручну":
+        context.user_data["admin_booking"]["existing_student"] = False
+        context.user_data["state"] = "admin_manual_enter_name"
+        await update.message.reply_text(
+            "📝 *Крок 2/7: Ім'я*\nВведіть ім'я та прізвище:",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+
+async def handle_admin_manual_enter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 2: Введення імені"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "admin_manual_enter_phone"
+        await update.message.reply_text(
+            "📱 Введіть номер телефону:",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
+        )
+        return
+    
+    context.user_data["admin_booking"]["name"] = text
+    context.user_data["state"] = "admin_manual_select_tariff"
+    
+    keyboard = [
+        [KeyboardButton("💰 450 грн/год")],
+        [KeyboardButton("💰 490 грн/год")],
+        [KeyboardButton("💰 550 грн/год")],
+        [KeyboardButton("🔙 Назад")]
+    ]
+    
+    await update.message.reply_text(
+        "💰 *Крок 3/7: Тариф*\n\nОберіть тариф:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_manual_select_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 3: Вибір тарифу"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "admin_manual_enter_name"
+        await update.message.reply_text(
+            "📝 Введіть ім'я та прізвище:",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True)
+        )
+        return
+    
+    # Витягуємо тариф з тексту
+    tariff = int(text.split()[1])
+    context.user_data["admin_booking"]["tariff"] = tariff
+    context.user_data["state"] = "admin_manual_select_transmission"
+    
+    keyboard = [
+        [KeyboardButton("🚗 Автомат")],
+        [KeyboardButton("🚙 Механіка")],
+        [KeyboardButton("🔙 Назад")]
+    ]
+    
+    await update.message.reply_text(
+        "🚗 *Крок 4/7: Коробка передач*\n\nОберіть тип:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_manual_select_transmission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 4: Вибір коробки"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "admin_manual_select_tariff"
+        keyboard = [
+            [KeyboardButton("💰 450 грн/год")],
+            [KeyboardButton("💰 490 грн/год")],
+            [KeyboardButton("💰 550 грн/год")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        await update.message.reply_text(
+            "💰 Оберіть тариф:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
+    if text not in ["🚗 Автомат", "🚙 Механіка"]:
+        await update.message.reply_text("⚠️ Оберіть коробку передач із меню.")
+        return
+    
+    transmission = "Автомат" if text == "🚗 Автомат" else "Механіка"
+    context.user_data["admin_booking"]["transmission"] = transmission
+    
+    instructors = get_instructors_by_transmission(transmission)
+    if not instructors:
+        await update.message.reply_text("😔 Немає інструкторів для цього типу.")
+        return
+    
+    keyboard = []
+    for instructor in instructors:
+        rating = get_instructor_rating(instructor)
+        if rating > 0:
+            stars = "⭐" * int(rating)
+            keyboard.append([KeyboardButton(f"{instructor} {stars} ({rating:.1f})")])
+        else:
+            keyboard.append([KeyboardButton(f"{instructor} 🆕")])
+    keyboard.append([KeyboardButton("🔙 Назад")])
+    
+    context.user_data["state"] = "admin_manual_select_instructor"
+    await update.message.reply_text(
+        "👨‍🏫 *Крок 5/7: Інструктор*\n\nОберіть інструктора:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_manual_select_instructor(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 5: Вибір інструктора"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        if context.user_data["admin_booking"].get("existing_student"):
+            # Повертаємось до підтвердження
+            context.user_data["state"] = "admin_manual_confirm_student"
+            await update.message.reply_text("Підтвердіть дані учня:")
+        else:
+            context.user_data["state"] = "admin_manual_select_transmission"
+            keyboard = [
+                [KeyboardButton("🚗 Автомат")],
+                [KeyboardButton("🚙 Механіка")],
+                [KeyboardButton("🔙 Назад")]
+            ]
+            await update.message.reply_text(
+                "🚗 Оберіть коробку:",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+        return
+    
+    # Витягуємо ім'я інструктора
+    instructor_name = text.split(" ⭐")[0].split(" 🆕")[0]
+    context.user_data["admin_booking"]["instructor"] = instructor_name
+    
+    # Генеруємо дати (30 днів для адміна)
+    dates = get_next_dates(30, instructor_name)
+    
+    if not dates:
+        await update.message.reply_text(
+            f"😔 У інструктора {instructor_name} всі години зайняті на найближчі 30 днів\n\n"
+            f"💡 Оберіть іншого інструктора або спробуйте пізніше."
+        )
+        return
+    
+    keyboard = []
+    for date in dates:
+        keyboard.append([KeyboardButton(date)])
+    keyboard.append([KeyboardButton("🔙 Назад")])
+    
+    context.user_data["state"] = "admin_manual_select_date"
+    await update.message.reply_text(
+        "📅 *Крок 6/7: Дата*\n\nОберіть дату:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_manual_select_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 6: Вибір дати"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "admin_manual_select_instructor"
+        await update.message.reply_text("👨‍🏫 Оберіть іншого інструктора:")
+        return
+    
+    # Парсимо дату
+    try:
+        parts = text.split()
+        date_part = parts[1]  # "25.02"
+        day, month = date_part.split('.')
+        year = datetime.now().year
+        if int(month) < datetime.now().month:
+            year += 1
+        date_str = f"{day.zfill(2)}.{month.zfill(2)}.{year}"
+        
+        context.user_data["admin_booking"]["date"] = date_str
+        
+        # Отримуємо вільні слоти
+        instructor = context.user_data["admin_booking"]["instructor"]
+        free_slots = get_available_time_slots(instructor, date_str)
+        
+        if not free_slots:
+            await update.message.reply_text("❌ Немає вільних часів. Оберіть іншу дату.")
+            return
+        
+        # Показуємо слоти по 3 в рядку
+        keyboard = []
+        for i in range(0, len(free_slots), 3):
+            row = []
+            for j in range(3):
+                if i + j < len(free_slots):
+                    row.append(KeyboardButton(free_slots[i + j]))
+            keyboard.append(row)
+        keyboard.append([KeyboardButton("🔙 Назад")])
+        
+        context.user_data["state"] = "admin_manual_select_time"
+        await update.message.reply_text(
+            f"🕐 *Крок 7/7: Час*\n\n"
+            f"Оберіть час заняття:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+    except:
+        await update.message.reply_text("❌ Помилка парсингу дати. Оберіть зі списку.")
+
+async def handle_admin_manual_select_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 7: Вибір часу"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "admin_manual_select_date"
+        await update.message.reply_text("📅 Оберіть іншу дату:")
+        return
+    
+    # Перевірка формату часу
+    if not re.match(r'^([0-1][0-9]|2[0-3]):[0-5][0-9]$', text):
+        await update.message.reply_text("⚠️ Оберіть час з кнопок нижче.")
+        return
+    
+    context.user_data["admin_booking"]["time"] = text
+    context.user_data["state"] = "admin_manual_select_duration"
+    
+    keyboard = [
+        [KeyboardButton("1 година")],
+        [KeyboardButton("1.5 години")],
+        [KeyboardButton("2 години")],
+        [KeyboardButton("🔙 Назад")]
+    ]
+    
+    await update.message.reply_text(
+        "⏱ *Крок 8/8: Тривалість*\n\nОберіть тривалість:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_manual_select_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Крок 8: Вибір тривалості"""
+    text = update.message.text
+    
+    if text == "🔙 Назад":
+        context.user_data["state"] = "admin_manual_select_time"
+        await update.message.reply_text("🕐 Оберіть інший час:")
+        return
+    
+    if text not in ["1 година", "1.5 години", "2 години"]:
+        await update.message.reply_text("⚠️ Оберіть тривалість із меню.")
+        return
+    
+    context.user_data["admin_booking"]["duration"] = text
+    
+    # Показуємо підтвердження
+    booking = context.user_data["admin_booking"]
+    tariff = booking["tariff"]
+    
+    # Рахуємо вартість
+    if "2" in text:
+        price = tariff * 2
+    elif "1.5" in text:
+        price = tariff * 1.5
+    else:
+        price = tariff
+    
+    keyboard = [
+        [KeyboardButton("✅ Підтвердити")],
+        [KeyboardButton("🔙 Скасувати")]
+    ]
+    
+    context.user_data["state"] = "admin_manual_confirm"
+    await update.message.reply_text(
+        f"📋 *Підтвердження запису*\n\n"
+        f"👤 Учень: {booking['name']}\n"
+        f"📱 Телефон: {booking['phone']}\n"
+        f"👨‍🏫 Інструктор: {booking['instructor']}\n"
+        f"📅 Дата: {booking['date']}\n"
+        f"🕐 Час: {booking['time']}\n"
+        f"⏱ Тривалість: {text}\n"
+        f"💰 Вартість: {price:.0f} грн\n\n"
+        f"⚠️ *Учень НЕ отримає автоматичне повідомлення*\n"
+        f"Зателефонуйте йому самостійно!",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Підтвердження та створення запису"""
+    text = update.message.text
+    
+    if text == "🔙 Скасувати":
+        await show_admin_panel(update, context)
+        return
+    
+    if text != "✅ Підтвердити":
+        return
+    
+    booking = context.user_data["admin_booking"]
+    
+    # Отримуємо instructor_id
+    instructor_data = get_instructor_by_name(booking["instructor"])
+    if not instructor_data:
+        await update.message.reply_text("❌ Помилка: інструктор не знайдений.")
+        return
+    
+    instructor_id = instructor_data[0]
+    
+    # Створюємо урок
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO lessons 
+                (student_name, student_phone, student_tariff, instructor_id, date, time, duration, status, student_telegram_id, booking_comment)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', NULL, 'Запис адміном')
+            """, (
+                booking["name"],
+                booking["phone"],
+                booking["tariff"],
+                instructor_id,
+                booking["date"],
+                booking["time"],
+                booking["duration"]
+            ))
+            conn.commit()
+        
+        await update.message.reply_text(
+            f"✅ *Запис створено!*\n\n"
+            f"📋 Деталі:\n"
+            f"{booking['name']} → {booking['instructor']}\n"
+            f"{booking['date']} {booking['time']} ({booking['duration']})\n\n"
+            f"📞 *Зателефонуйте учню:*\n"
+            f"{booking['phone']}",
+            parse_mode="Markdown"
+        )
+        
+        await show_admin_panel(update, context)
+        
+    except Exception as e:
+        logger.error(f"Error creating manual booking: {e}")
+        await update.message.reply_text("❌ Помилка при створенні запису.")
 
 # ======================= STUDENT FUNCTIONS =======================
 async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYPE):
