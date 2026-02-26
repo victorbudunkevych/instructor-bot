@@ -2693,6 +2693,20 @@ async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEF
     """Обробка меню управління записами"""
     text = update.message.text
     
+    # Якщо тільки зайшли в меню - показуємо кнопки
+    if text == "✏️ Управління записами":
+        keyboard = [
+            [KeyboardButton("❌ Скасувати запис учня")],
+            [KeyboardButton("➕ Записати учня вручну")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        context.user_data["state"] = "admin_manage_bookings"
+        await update.message.reply_text(
+            "✏️ Управління записами\n\nОберіть дію:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
     if text == "🔙 Назад":
         await show_admin_panel(update, context)
         return
