@@ -26,7 +26,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 TOKEN = "8337801301:AAGXhZVzyoqjED_taA2qqgtaxg8eGeFqiWQ"
 ADMIN_ID = [
     669706811,   # Віктор (власник)
-    648021272,   # Кузенко Руслана
+    7825439360,   # Сахарова
     884453802    # Стефанюк Ірка
 ]
 TIMEZONE = "Europe/Kyiv"
