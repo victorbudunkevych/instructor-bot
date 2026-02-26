@@ -26,8 +26,8 @@ from openpyxl.styles import Font, Alignment, PatternFill
 TOKEN = "8337801301:AAGXhZVzyoqjED_taA2qqgtaxg8eGeFqiWQ"
 ADMIN_ID = [
     669706811,   # Віктор (власник)
-    7825439360,   # Сахарова
-    884453802    # Стефанюк Ірка
+    648021272,   # Кузенко Руслана
+    884453802    # Стефанюк Ірина
 ]
 TIMEZONE = "Europe/Kyiv"
 
@@ -322,7 +322,44 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     logger.info(f"🟢 START викликано! User: {user_id}, Args: {context.args}")
     
-    # Обробка deep links для реєстрації
+    # ✅ СПОЧАТКУ перевіряємо чи це адмін (НЕ інструктор, а саме адмін)
+    # Адміни отримують панель адміна незалежно від deep links
+    if is_admin(user_id):
+        # Перевіряємо чи адмін також є інструктором
+        try:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (user_id,))
+                is_instructor = cursor.fetchone() is not None
+            
+            if is_instructor:
+                # Адмін-інструктор - показуємо панель інструктора з доступом до адмін-панелі
+                keyboard = [
+                    [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")],
+                    [KeyboardButton("📅 Мій розклад")],
+                    [KeyboardButton("⚙️ Управління графіком")],
+                    [KeyboardButton("📊 Моя статистика")],
+                    [KeyboardButton("❌ Історія скасувань")],
+                    [KeyboardButton("⭐ Оцінити учня")],
+                    [KeyboardButton("🔐 Панель адміна")]
+                ]
+                text = "Привіт! 👋 Я бот *Автоінструктор*.\n\n👨‍🏫 *Панель інструктора*\n🔐 *Панель адміністратора*\n\nОберіть дію:"
+                context.user_data["state"] = "waiting_for_transmission"
+            else:
+                # Тільки адмін (не інструктор) - показуємо панель адміна одразу
+                await show_admin_panel(update, context)
+                return
+            
+            await update.message.reply_text(
+                text,
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+                parse_mode="Markdown"
+            )
+            return
+        except Exception as e:
+            logger.error(f"Error checking admin status: {e}", exc_info=True)
+    
+    # Обробка deep links для реєстрації (тільки для НЕ-адмінів)
     if context.args:
         command = context.args[0]
         logger.info(f"🔗 Deep link виявлено: {command}")
@@ -354,10 +391,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [KeyboardButton("⭐ Оцінити учня")]
             ]
             text = "Привіт! 👋 Я бот *Автоінструктор*.\n\n👨‍🏫 *Панель інструктора*\n\nОберіть дію:"
-            
-            if is_admin(user_id):
-                keyboard.append([KeyboardButton("🔐 Панель адміна")])
-                text += "\n🔐 *Панель адміністратора*"
             
             context.user_data["state"] = "waiting_for_transmission"
             
