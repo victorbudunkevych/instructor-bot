@@ -27,7 +27,7 @@ TOKEN = "8337801301:AAGXhZVzyoqjED_taA2qqgtaxg8eGeFqiWQ"
 ADMIN_ID = [
     669706811,   # Віктор (власник)
     648021272,   # Кузенко Руслана
-    884453802    # Стефанюк Ірина
+    884453802    # Стефанюк Ірка
 ]
 TIMEZONE = "Europe/Kyiv"
 
