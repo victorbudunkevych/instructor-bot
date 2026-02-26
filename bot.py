@@ -693,6 +693,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         if state == "admin_panel":
+            # Якщо натиснув "Управління записами" - показуємо меню
+            if update.message.text == "✏️ Управління записами":
+                await handle_admin_manage_bookings(update, context)
+                return
             await handle_admin_report(update, context)
             return
         
