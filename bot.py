@@ -24,7 +24,11 @@ from openpyxl.styles import Font, Alignment, PatternFill
 # ==================== PRODUCTION КОНФІГУРАЦІЯ ====================
 # PRODUCTION БОТ TOKEN
 TOKEN = "8337801301:AAGXhZVzyoqjED_taA2qqgtaxg8eGeFqiWQ"
-ADMIN_ID = 669706811  # Твій Telegram ID
+ADMIN_ID = [
+    669706811,   # Віктор (власник)
+    648021272,   # Кузенко Руслана
+    884453802    # Стефанюк Ірина
+]
 TIMEZONE = "Europe/Kyiv"
 
 # БАЗА ДАНИХ НА PERSISTENT DISK
@@ -310,7 +314,7 @@ def validate_date_format(date_str):
 
 def is_admin(user_id):
     """Перевірка чи користувач є адміном"""
-    return user_id == ADMIN_ID
+    return user_id in ADMIN_ID
 
 # ======================= START =======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
