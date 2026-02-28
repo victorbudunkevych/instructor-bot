@@ -175,15 +175,27 @@ def get_next_dates(days=14, instructor_name=None):
     """Генерує список дат на найближчі N днів з кількістю вільних годин
     
     Календар оновлюється о 8:00 ранку:
-    - До 8:00 - показує 14 днів від сьогодні
-    - Після 8:00 - показує 14 днів від сьогодні (з новим 15-м днем)
+    - До 8:00 - показує 14 днів від ВЧОРА (щоб було 14 днів доступних)
+    - Після 8:00 - показує 14 днів від СЬОГОДНІ (новий 14-й день додається)
     """
     dates = []
     now = datetime.now(TZ)
-    today = now.date()  # Завжди сьогодні, без вчорашніх дат
+    
+    # ✅ ВИПРАВЛЕНО: Календар оновлюється о 8:00
+    if now.hour < 8:
+        # До 8:00 ранку - рахуємо від вчора (щоб показувати 14 днів)
+        start_date = now.date() - timedelta(days=1)
+    else:
+        # Після 8:00 - рахуємо від сьогодні (14-й день додається)
+        start_date = now.date()
     
     for i in range(days):
-        date = today + timedelta(days=i)
+        date = start_date + timedelta(days=i)
+        
+        # Пропускаємо дати в минулому
+        if date < now.date():
+            continue
+            
         date_formatted = date.strftime('%d.%m.%Y')
         
         # Форматуємо дату: "Пн 13.12.2024"
@@ -240,8 +252,14 @@ def get_available_time_slots(instructor_name, date_str):
             if min_time.minute > 0:
                 min_hour += 1
             
+            # ЗАВЖДИ не раніше робочих годин (8:00)
             start_hour = max(min_hour, WORK_HOURS_START)
         else:
+            # Завтра або пізніше - завжди з робочих годин
+            start_hour = WORK_HOURS_START
+        
+        # Додаткова перевірка: якщо час до 8:00 - починаємо з 8:00
+        if start_hour < WORK_HOURS_START:
             start_hour = WORK_HOURS_START
         
         hour = start_hour
@@ -2999,7 +3017,7 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
                     chat_id=student_telegram_id,
                     text=f"😔 Вибачте, ваш урок на {date} о {time} з інструктором {instructor_name} "
                          f"скасовано адміністратором.\n\n"
-                         f"Зв'яжіться з нами для перенесення:\n📞 +380677499988 \n📞 +380505475557"
+                         f"Зв'яжіться з нами для перенесення:\n📞 +380671234567"
                 )
             except Exception as e:
                 logger.error(f"Не вдалось відправити повідомлення учню {student_telegram_id}: {e}")
