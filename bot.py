@@ -982,6 +982,75 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await show_booking_confirmation(update, context)
                 return
         
+        # === МЕНЮ ВИБОРУ ПЕРІОДУ РОЗКЛАДУ ===
+        if state == "instructor_schedule_menu":
+            now = datetime.now(TZ)
+            today = now.date()
+            
+            if text == "📅 На сьогодні":
+                # Сьогодні
+                await show_instructor_schedule_period(update, context, date_from=today, date_to=today)
+                return
+            elif text == "📅 На завтра":
+                # Завтра
+                tomorrow = today + timedelta(days=1)
+                await show_instructor_schedule_period(update, context, date_from=tomorrow, date_to=tomorrow)
+                return
+            elif text == "📅 На тиждень":
+                # Наступні 7 днів
+                week_end = today + timedelta(days=6)
+                await show_instructor_schedule_period(update, context, date_from=today, date_to=week_end)
+                return
+            elif text == "📅 Свій період":
+                # Запитуємо період
+                context.user_data["state"] = "instructor_schedule_custom_period"
+                keyboard = [[KeyboardButton("🔙 Назад")]]
+                await update.message.reply_text(
+                    "📅 Введіть період у форматі:\n"
+                    "*ДД.ММ.РРРР - ДД.ММ.РРРР*\n\n"
+                    "Наприклад: 01.03.2026 - 15.03.2026",
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+                    parse_mode="Markdown"
+                )
+                return
+            elif text == "🔙 Назад":
+                await start(update, context)
+                return
+        
+        # === ВВЕДЕННЯ СВОГО ПЕРІОДУ ===
+        if state == "instructor_schedule_custom_period":
+            if text == "🔙 Назад":
+                await show_instructor_schedule(update, context)
+                return
+            
+            # Парсимо дати
+            try:
+                parts = text.split('-')
+                if len(parts) != 2:
+                    raise ValueError("Неправильний формат")
+                
+                date_from_str = parts[0].strip()
+                date_to_str = parts[1].strip()
+                
+                date_from = datetime.strptime(date_from_str, "%d.%m.%Y").date()
+                date_to = datetime.strptime(date_to_str, "%d.%m.%Y").date()
+                
+                if date_from > date_to:
+                    await update.message.reply_text("❌ Дата початку не може бути пізніше дати кінця.")
+                    return
+                
+                await show_instructor_schedule_period(update, context, date_from=date_from, date_to=date_to)
+                return
+                
+            except Exception as e:
+                await update.message.reply_text(
+                    "❌ Неправильний формат дати.\n\n"
+                    "Використовуйте формат: *ДД.ММ.РРРР - ДД.ММ.РРРР*\n"
+                    "Наприклад: 01.03.2026 - 15.03.2026",
+                    parse_mode="Markdown"
+                )
+                return
+        
         # === ВИБІР КОРОБКИ ===
         if state == "waiting_for_transmission":
             # Якщо натиснули "Обрати іншого інструктора" - показуємо список
@@ -1523,7 +1592,38 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
 
 # ======================= INSTRUCTOR FUNCTIONS =======================
 async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показати розклад інструктора"""
+    """Показати меню вибору періоду для розкладу"""
+    user_id = update.message.from_user.id
+    
+    try:
+        instructor_data = get_instructor_by_telegram_id(user_id)
+        if not instructor_data:
+            await update.message.reply_text("❌ Ви не зареєстровані як інструктор.")
+            return
+        
+        # Показуємо меню вибору періоду
+        keyboard = [
+            [KeyboardButton("📅 На сьогодні"), KeyboardButton("📅 На завтра")],
+            [KeyboardButton("📅 На тиждень")],
+            [KeyboardButton("📅 Свій період")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        
+        context.user_data["state"] = "instructor_schedule_menu"
+        
+        await update.message.reply_text(
+            "📅 *Мій розклад*\n\nОберіть період для перегляду:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in show_instructor_schedule: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка завантаження меню.")
+
+
+async def show_instructor_schedule_period(update: Update, context: ContextTypes.DEFAULT_TYPE, date_from=None, date_to=None):
+    """Показати розклад інструктора за вказаний період"""
     user_id = update.message.from_user.id
     
     try:
@@ -1534,7 +1634,7 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
         
         instructor_id, instructor_name = instructor_data
         
-        # Поточна дата та час у форматі БД (ДД.ММ.РРРР ГГ:ХХ)
+        # Поточна дата та час
         now = datetime.now(TZ)
         
         with get_db() as conn:
@@ -1557,9 +1657,16 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
                 # Парсимо дату з БД (ДД.ММ.РРРР)
                 lesson_datetime = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
                 lesson_datetime = TZ.localize(lesson_datetime)
+                lesson_date = lesson_datetime.date()
                 
                 # Порівнюємо - тільки майбутні
                 if lesson_datetime >= now:
+                    # ✅ ФІЛЬТРАЦІЯ ПО ПЕРІОДУ (якщо вказаний)
+                    if date_from and lesson_date < date_from:
+                        continue
+                    if date_to and lesson_date > date_to:
+                        continue
+                    
                     lessons.append((lesson_datetime, date, time, duration, student_name, student_phone, status, booking_comment))
             except:
                 pass
@@ -1571,35 +1678,67 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
         lessons = [(d, t, dur, sn, sp, st, bc) for (_, d, t, dur, sn, sp, st, bc) in lessons[:100]]
         
         if not lessons:
-            await update.message.reply_text("📋 У вас поки немає запланованих занять.")
+            keyboard = [[KeyboardButton("🔙 Назад")]]
+            await update.message.reply_text(
+                "📋 У вас поки немає запланованих занять за цей період.",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
             return
         
-        text = f"📅 *Ваш розклад:*\n\n"
+        # Формуємо заголовок з періодом
+        if date_from and date_to:
+            if date_from == date_to:
+                period_text = f"на {date_from.strftime('%d.%m.%Y')}"
+            else:
+                period_text = f"з {date_from.strftime('%d.%m.%Y')} по {date_to.strftime('%d.%m.%Y')}"
+        else:
+            period_text = ""
+        
+        # ✅ РОЗБИВАЄМО НА ПОВІДОМЛЕННЯ ПО 3000 СИМВОЛІВ
+        messages = []
+        current_message = f"📅 *Ваш розклад {period_text}:*\n\n"
         current_date = None
         
         for date, time, duration, student_name, student_phone, status, booking_comment in lessons:
+            # Формуємо текст для одного уроку
+            lesson_text = ""
             if date != current_date:
-                text += f"\n📆 *{date}*\n"
+                lesson_text += f"\n📆 *{date}*\n"
                 current_date = date
             
-            text += f"🕐 {time} ({duration})\n"
-            text += f"👤 {student_name}\n"
+            lesson_text += f"🕐 {time} ({duration})\n"
+            lesson_text += f"👤 {student_name}\n"
             if student_phone:
-                text += f"📱 {student_phone}\n"
+                lesson_text += f"📱 {student_phone}\n"
             if booking_comment:
-                text += f"💬 \"{booking_comment}\"\n"
-            text += "\n"
+                lesson_text += f"💬 \"{booking_comment}\"\n"
+            lesson_text += "\n"
+            
+            # Перевіряємо чи не перевищимо ліміт (залишаємо запас)
+            if len(current_message + lesson_text) > 3000:
+                # Зберігаємо поточне повідомлення і починаємо нове
+                messages.append(current_message)
+                current_message = lesson_text
+            else:
+                current_message += lesson_text
         
-        # Додаємо тільки кнопку Назад
-        keyboard = [
-            [KeyboardButton("🔙 Назад")]
-        ]
+        # Додаємо останнє повідомлення
+        if current_message:
+            messages.append(current_message)
         
-        await update.message.reply_text(
-            text,
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-            parse_mode="Markdown"
-        )
+        # Відправляємо всі повідомлення
+        for i, msg in enumerate(messages):
+            # Кнопку "Назад" додаємо тільки в ОСТАННЬОМУ повідомленні
+            if i == len(messages) - 1:
+                keyboard = [[KeyboardButton("🔙 Назад")]]
+                await update.message.reply_text(
+                    msg,
+                    reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+                    parse_mode="Markdown"
+                )
+            else:
+                # Проміжні повідомлення без кнопок
+                await update.message.reply_text(msg, parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Error in show_instructor_schedule: {e}", exc_info=True)
