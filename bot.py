@@ -4147,9 +4147,12 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 FROM lessons
                 WHERE student_telegram_id = ? 
-                AND date BETWEEN ? AND ?
+                AND substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2) 
+                    BETWEEN ? AND ?
                 AND status = 'active'
-            """, (student_telegram_id, week_start_str, week_end_str))
+            """, (student_telegram_id, 
+                  week_start.strftime("%Y-%m-%d"), 
+                  week_end.strftime("%Y-%m-%d")))
             
             total_hours_week = cursor.fetchone()[0] or 0
             
@@ -4162,10 +4165,13 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 SELECT date, time, duration, status
                 FROM lessons
                 WHERE student_telegram_id = ? 
-                AND date BETWEEN ? AND ?
+                AND substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2) 
+                    BETWEEN ? AND ?
                 AND status = 'active'
-                ORDER BY date, time
-            """, (student_telegram_id, week_start_str, week_end_str))
+                ORDER BY substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2), time
+            """, (student_telegram_id, 
+                  week_start.strftime("%Y-%m-%d"), 
+                  week_end.strftime("%Y-%m-%d")))
             
             week_lessons = cursor.fetchall()
             logger.info(f"   📝 Деталі записів на тиждень ({len(week_lessons)} шт):")
