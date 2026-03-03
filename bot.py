@@ -4131,6 +4131,12 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             week_start_str = week_start.strftime("%d.%m.%Y")
             week_end_str = week_end.strftime("%d.%m.%Y")
             
+            logger.info(f"🔍 ПЕРЕВІРКА ТИЖНЕВОГО ЛІМІТУ:")
+            logger.info(f"   Учень: telegram_id={student_telegram_id}")
+            logger.info(f"   Дата запису: {date}")
+            logger.info(f"   Тиждень: {week_start_str} - {week_end_str}")
+            logger.info(f"   Тривалість нового запису: {lesson_hours} год")
+            
             cursor.execute("""
                 SELECT SUM(
                     CASE 
@@ -4146,6 +4152,25 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """, (student_telegram_id, week_start_str, week_end_str))
             
             total_hours_week = cursor.fetchone()[0] or 0
+            
+            logger.info(f"   Вже записано на цей тиждень: {total_hours_week} год")
+            logger.info(f"   Разом буде: {total_hours_week + lesson_hours} год")
+            logger.info(f"   Ліміт: 6 год")
+            
+            # Показуємо які саме записи враховані
+            cursor.execute("""
+                SELECT date, time, duration, status
+                FROM lessons
+                WHERE student_telegram_id = ? 
+                AND date BETWEEN ? AND ?
+                AND status = 'active'
+                ORDER BY date, time
+            """, (student_telegram_id, week_start_str, week_end_str))
+            
+            week_lessons = cursor.fetchall()
+            logger.info(f"   📝 Деталі записів на тиждень ({len(week_lessons)} шт):")
+            for wl_date, wl_time, wl_dur, wl_status in week_lessons:
+                logger.info(f"      - {wl_date} {wl_time}, {wl_dur}, status={wl_status}")
             
             if total_hours_week + lesson_hours > 6:
                 await update.message.reply_text(
