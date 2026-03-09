@@ -47,7 +47,7 @@ WORK_HOURS_START = 8
 WORK_HOURS_END = 18
 # Ціни за годину
 PRICES = {
-    "1 година": 400,
+    "1 година": 420,
     "2 години": 800
 }
 from database import (
@@ -135,11 +135,11 @@ TZ = pytz.timezone(TIMEZONE)
 def ensure_instructors_exist():
     """Автоматично додає інструкторів якщо їх немає в базі"""
     instructors = [
-        (646703680, 'Мартович Владислав', '+380684232133', 'Автомат', 450),
+        (646703680, 'Мартович Владислав', '+380684232133', 'Автомат', 490),
         (5077103081, 'Фірсов Артур', '+380666619757', 'Механіка', 550),
         (197658460, 'Урядко Артур', '+380502380725', 'Механіка', 550),
-        (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 450),
-        (2042857396, 'Будункевич Мирослав', '+380982534001', 'Механіка', 450),
+        (669706811, 'Будункевич Віктор', '+380936879999', 'Автомат', 490),
+        (2042857396, 'Будункевич Мирослав', '+380982534001', 'Механіка', 490),
         (5140435045, 'Блажевський Ігор', '+380664009381', 'Механіка', 550),
         (1846725989, 'Рекетчук Богдан', '+380501591448', 'Механіка', 550),
         (831664827, 'Данилишин Святослав', '+380960755539', 'Механіка', 550)
@@ -381,9 +381,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         command = context.args[0]
         logger.info(f"🔗 Deep link виявлено: {command}")
-        if command == "register450":
-            logger.info("➡️ Перенаправлення на register_450")
-            await register_450(update, context)
+        if command == "register490":
+            logger.info("➡️ Перенаправлення на register_490")
+            await register_490(update, context)
             return
         elif command == "register550":
             logger.info("➡️ Перенаправлення на register_550")
@@ -454,13 +454,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Виникла помилка. Спробуйте /start")
 
 # ======================= REGISTRATION COMMANDS =======================
-async def register_450(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Реєстрація учня з тарифом 450 грн"""
-    logger.info("🔵 register_450 викликано!")
+async def register_490(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Реєстрація учня з тарифом 490 грн"""
+    logger.info("🔵 register_490 викликано!")
     try:
-        await register_student_with_tariff(update, context, 450)
+        await register_student_with_tariff(update, context, 490)
     except Exception as e:
-        logger.error(f"❌ Помилка в register_450: {e}", exc_info=True)
+        logger.error(f"❌ Помилка в register_490: {e}", exc_info=True)
 
 async def register_550(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Реєстрація учня з тарифом 550 грн"""
@@ -1551,7 +1551,7 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
             price = student_tariff
     else:
         # Якщо немає тарифу - стандартні ціни
-        price = PRICES.get(duration, 400)
+        price = PRICES.get(duration, 420)
     
     context.user_data["state"] = "waiting_for_confirmation"
     
@@ -2861,7 +2861,7 @@ async def generate_admin_report(update: Update, context: ContextTypes.DEFAULT_TY
         for name, lessons, hours, avg_rating, cancelled in report_data:
             if lessons > 0:
                 hours = hours or 0
-                earnings = hours * 400
+                earnings = hours * 420
                 
                 text += f"👨‍🏫 {name}\n"
                 text += f"   📝 Занять: {lessons}\n"
@@ -3319,7 +3319,7 @@ async def handle_admin_manual_enter_name(update: Update, context: ContextTypes.D
     context.user_data["state"] = "admin_manual_select_tariff"
     
     keyboard = [
-        [KeyboardButton("💰 450 грн/год")],
+        [KeyboardButton("💰 490 грн/год")],
         [KeyboardButton("💰 490 грн/год")],
         [KeyboardButton("💰 550 грн/год")],
         [KeyboardButton("🔙 Назад")]
@@ -3367,7 +3367,7 @@ async def handle_admin_manual_select_transmission(update: Update, context: Conte
     if text == "🔙 Назад":
         context.user_data["state"] = "admin_manual_select_tariff"
         keyboard = [
-            [KeyboardButton("💰 450 грн/год")],
+            [KeyboardButton("💰 490 грн/год")],
             [KeyboardButton("💰 490 грн/год")],
             [KeyboardButton("💰 550 грн/год")],
             [KeyboardButton("🔙 Назад")]
@@ -3999,7 +3999,7 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                 elif student_tariff:
                     price = student_tariff
                 else:
-                    price = PRICES.get(duration, 400)
+                    price = PRICES.get(duration, 420)
                 
                 await context.bot.send_message(
                     chat_id=instructor_telegram_id,
@@ -4258,7 +4258,7 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 price = student_tariff
         else:
-            price = PRICES.get(duration, 400)
+            price = PRICES.get(duration, 420)
         
         # Повідомлення інструктору (З особистими даними ТА сумою)
         booking_comment = context.user_data.get("booking_comment", "")
@@ -5356,7 +5356,7 @@ def main():
 
         # Команди
         app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("register450", register_450))
+        app.add_handler(CommandHandler("register490", register_490))
         app.add_handler(CommandHandler("register550", register_550))
         
         # Обробники
@@ -5375,7 +5375,7 @@ def main():
         logger.info("🚀 Бот запущено!")
         print("🚀 Бот запущено і слухає...")
         print("\n📝 Посилання для реєстрації учнів:")
-        print(f"   450 грн: https://t.me/InstructorIFBot?start=register450")
+        print(f"   490 грн: https://t.me/InstructorIFBot?start=register490")
         print(f"   550 грн: https://t.me/InstructorIFBot?start=register550")
         
         # Запускаємо polling в окремому потоці
