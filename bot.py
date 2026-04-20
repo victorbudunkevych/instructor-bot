@@ -3611,8 +3611,8 @@ async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFA
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO lessons 
-                (student_name, student_phone, student_tariff, instructor_id, date, time, duration, status, student_telegram_id, booking_comment)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', NULL, 'Запис адміном')
+                (student_name, student_phone, student_tariff, instructor_id, date, time, duration, status, student_telegram_id, booking_comment, earnings)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', NULL, 'Запис адміном', ?)
             """, (
                 booking["name"],
                 booking["phone"],
@@ -3620,7 +3620,8 @@ async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFA
                 instructor_id,
                 booking["date"],
                 booking["time"],
-                booking["duration"]
+                booking["duration"],
+                PRICES.get(booking["duration"], 0)
             ))
             conn.commit()
         
@@ -4236,11 +4237,14 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             booking_comment = context.user_data.get("booking_comment", "")
             
+            # Розраховуємо earnings для інструктора
+            earnings = PRICES.get(duration, 0)
+            
             cursor.execute("""
                 INSERT INTO lessons 
-                (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, status, booking_comment)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-            """, (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, booking_comment))
+                (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, status, booking_comment, earnings)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+            """, (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, booking_comment, earnings))
             conn.commit()
         
         # Повідомлення учню (БЕЗ особистих даних)
