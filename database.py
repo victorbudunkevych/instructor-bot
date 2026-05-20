@@ -689,6 +689,23 @@ def get_student_by_telegram_id(telegram_id):
         logger.error(f"Помилка get_student_by_telegram_id: {e}")
         return None
 
+def get_student_by_phone(phone):
+    """Отримати дані учня за номером телефону"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # Нормалізуємо номер — шукаємо по останніх 9 цифрах щоб ловити +380/0 варіанти
+            digits = ''.join(filter(str.isdigit, phone))[-9:]
+            cursor.execute("""
+                SELECT id, name, phone, tariff, telegram_id
+                FROM students
+                WHERE REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), ' ', '') LIKE ?
+            """, (f'%{digits}',))
+            return cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Error in get_student_by_phone: {e}")
+        return None
+
 def add_instructor_rating(lesson_id, rating, feedback=""):
     """Додати оцінку інструктора для учня"""
     try:
