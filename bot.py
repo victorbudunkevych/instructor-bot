@@ -379,17 +379,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error checking admin status: {e}", exc_info=True)
     
-    # Обробка deep links для реєстрації (тільки для НЕ-адмінів)
+    # Обробка deep links — реєстрація через посилання ЗАБЛОКОВАНА
     if context.args:
         command = context.args[0]
-        logger.info(f"🔗 Deep link виявлено: {command}")
-        if command == "register490":
-            logger.info("➡️ Перенаправлення на register_490")
-            await register_490(update, context)
-            return
-        elif command == "register550":
-            logger.info("➡️ Перенаправлення на register_550")
-            await register_550(update, context)
+        logger.info(f"🔗 Deep link виявлено: {command} — доступ заблоковано")
+        if command in ("register490", "register550"):
+            await update.message.reply_text(
+                "⛔ *Самостійна реєстрація заблокована*\n\n"
+                "Для внесення вас в систему зверніться до адміністратора автошколи.\n\n"
+                "📞 Контакт адміністратора: @InstructorIFBot",
+                parse_mode="Markdown"
+            )
             return
     
     context.user_data.clear()
@@ -443,11 +443,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
             else:
-                # Не зареєстрований - пропонуємо зареєструватися через посилання
+                # Не зареєстрований - повідомляємо що треба звернутись до адміна
                 await update.message.reply_text(
-                    "⚠️ *Для запису на заняття потрібна реєстрація*\n\n"
-                    "Зверніться до адміністратора за посиланням для реєстрації.\n\n"
-                    "📞 Контакт: @ваш\\_адмін",
+                    "⛔ *Ви не зареєстровані в системі*\n\n"
+                    "Для отримання доступу зверніться до адміністратора автошколи — "
+                    "він внесе вас в систему вручну.\n\n"
+                    "Після реєстрації адміном напишіть /start ще раз.",
                     parse_mode="Markdown"
                 )
         
@@ -754,7 +755,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if update.message.text == "✏️ Управління записами":
                 await handle_admin_manage_bookings(update, context)
                 return
+            # Якщо натиснув "Додати учня" - запускаємо flow
+            if update.message.text == "➕ Додати учня":
+                await admin_add_student_start(update, context)
+                return
             await handle_admin_report(update, context)
+            return
+        
+        # === ДОДАВАННЯ УЧНЯ АДМІНОМ ===
+        if state == "admin_add_student_name":
+            await handle_admin_add_student_name(update, context)
+            return
+        
+        if state == "admin_add_student_phone":
+            await handle_admin_add_student_phone(update, context)
+            return
+        
+        if state == "admin_add_student_tariff":
+            await handle_admin_add_student_tariff(update, context)
+            return
+        
+        if state == "admin_add_student_tgid":
+            await handle_admin_add_student_tgid(update, context)
             return
         
         if state == "admin_manage_bookings":
@@ -2612,6 +2634,7 @@ async def show_admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton("👤 Звіт по інструктору")],
         [KeyboardButton("👥 Список інструкторів")],
         [KeyboardButton("✏️ Управління записами")],
+        [KeyboardButton("➕ Додати учня")],
         [KeyboardButton("📥 Експорт в Excel")],
         [KeyboardButton("🔙 Назад")]
     ]
@@ -2630,6 +2653,10 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "🔙 Назад":
         context.user_data.clear()  # Очищаємо стан
         await start(update, context)  # Повертаємось в головне меню
+        return
+    
+    if text == "➕ Додати учня":
+        await admin_add_student_start(update, context)
         return
     
     if text == "✏️ Управління записами":
@@ -2887,6 +2914,217 @@ async def generate_admin_report(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"Error in generate_admin_report: {e}", exc_info=True)
         await update.message.reply_text("❌ Помилка генерації звіту.")
+
+# ======================= ADMIN ADD STUDENT =======================
+async def admin_add_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Адмін розпочинає додавання нового учня"""
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ Доступ заборонено.")
+        return
+    
+    context.user_data["state"] = "admin_add_student_name"
+    context.user_data["new_student"] = {}
+    
+    keyboard = [[KeyboardButton("🔙 Скасувати")]]
+    await update.message.reply_text(
+        "➕ *Додавання нового учня*\n\n"
+        "Крок 1 з 4: Введіть ім'я та прізвище учня:\n\n"
+        "_Наприклад: Іваненко Олексій_",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_add_student_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введеного імені нового учня"""
+    text = update.message.text
+    
+    if text == "🔙 Скасувати":
+        await show_admin_panel(update, context)
+        return
+    
+    if len(text.strip()) < 3:
+        await update.message.reply_text("⚠️ Введіть повне ім'я (мінімум 3 символи):")
+        return
+    
+    context.user_data["new_student"]["name"] = text.strip()
+    context.user_data["state"] = "admin_add_student_phone"
+    
+    keyboard = [[KeyboardButton("🔙 Скасувати")]]
+    await update.message.reply_text(
+        f"✅ Ім'я: *{text.strip()}*\n\n"
+        "Крок 2 з 4: Введіть номер телефону учня:\n\n"
+        "_Формат: +380501234567 або 0501234567_",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_add_student_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка введеного телефону нового учня"""
+    text = update.message.text
+    
+    if text == "🔙 Скасувати":
+        await show_admin_panel(update, context)
+        return
+    
+    if not validate_phone(text):
+        await update.message.reply_text(
+            "⚠️ Невірний формат номера.\n\n"
+            "Введіть у форматі: +380501234567 або 0501234567"
+        )
+        return
+    
+    # Перевіряємо чи не існує вже учень з таким телефоном
+    existing = get_student_by_phone(text)
+    if existing:
+        await update.message.reply_text(
+            f"⚠️ Учень з таким номером вже є в системі!\n\n"
+            f"👤 {existing[1]}\n"
+            f"📱 {existing[2]}\n"
+            f"💰 Тариф: {existing[3]} грн/год\n\n"
+            f"Введіть інший номер або натисніть «Скасувати»:"
+        )
+        return
+    
+    context.user_data["new_student"]["phone"] = text.strip()
+    context.user_data["state"] = "admin_add_student_tariff"
+    
+    keyboard = [
+        [KeyboardButton("💰 490 грн/год"), KeyboardButton("💰 550 грн/год")],
+        [KeyboardButton("🔙 Скасувати")]
+    ]
+    name = context.user_data["new_student"]["name"]
+    await update.message.reply_text(
+        f"✅ Ім'я: *{name}*\n"
+        f"✅ Телефон: *{text.strip()}*\n\n"
+        "Крок 3 з 4: Оберіть тариф учня:",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_add_student_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка вибору тарифу нового учня"""
+    text = update.message.text
+    
+    if text == "🔙 Скасувати":
+        await show_admin_panel(update, context)
+        return
+    
+    tariff_map = {
+        "💰 490 грн/год": 490,
+        "💰 550 грн/год": 550
+    }
+    
+    if text not in tariff_map:
+        await update.message.reply_text("⚠️ Оберіть тариф із меню.")
+        return
+    
+    tariff = tariff_map[text]
+    context.user_data["new_student"]["tariff"] = tariff
+    context.user_data["state"] = "admin_add_student_tgid"
+    
+    keyboard = [
+        [KeyboardButton("⏭️ Пропустити")],
+        [KeyboardButton("🔙 Скасувати")]
+    ]
+    name = context.user_data["new_student"]["name"]
+    phone = context.user_data["new_student"]["phone"]
+    await update.message.reply_text(
+        f"✅ Ім'я: *{name}*\n"
+        f"✅ Телефон: *{phone}*\n"
+        f"✅ Тариф: *{tariff} грн/год*\n\n"
+        "Крок 4 з 4: Введіть Telegram ID учня\n\n"
+        "_(якщо учень вже писав боту — попросіть його переслати будь-яке повідомлення боту, "
+        "або знайдіть ID у логах. Якщо не знаєте — пропустіть)_",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+        parse_mode="Markdown"
+    )
+
+async def handle_admin_add_student_tgid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обробка telegram_id нового учня та збереження"""
+    text = update.message.text
+    
+    if text == "🔙 Скасувати":
+        await show_admin_panel(update, context)
+        return
+    
+    student_data = context.user_data.get("new_student", {})
+    name = student_data.get("name", "")
+    phone = student_data.get("phone", "")
+    tariff = student_data.get("tariff", 490)
+    
+    telegram_id = None
+    
+    if text != "⏭️ Пропустити":
+        # Перевіряємо чи це число
+        if not text.strip().lstrip("-").isdigit():
+            await update.message.reply_text(
+                "⚠️ Telegram ID — це число.\n\n"
+                "Введіть числовий ID або натисніть «Пропустити»:"
+            )
+            return
+        telegram_id = int(text.strip())
+        
+        # Перевіряємо чи не зайнятий цей telegram_id
+        existing = get_student_by_telegram_id(telegram_id)
+        if existing:
+            await update.message.reply_text(
+                f"⚠️ Цей Telegram ID вже прив'язаний до учня:\n\n"
+                f"👤 {existing[1]}\n"
+                f"📱 {existing[2]}\n\n"
+                "Введіть інший ID або натисніть «Пропустити»:"
+            )
+            return
+    
+    # Зберігаємо в БД
+    try:
+        success = register_student(name, phone, telegram_id, tariff, "admin")
+        
+        if success:
+            # Формуємо підсумок
+            summary = (
+                f"✅ *Учня успішно додано!*\n\n"
+                f"👤 Ім'я: {name}\n"
+                f"📱 Телефон: {phone}\n"
+                f"💰 Тариф: {tariff} грн/год\n"
+            )
+            if telegram_id:
+                summary += f"🆔 Telegram ID: {telegram_id}\n"
+            else:
+                summary += "🆔 Telegram ID: не вказано\n"
+            
+            await update.message.reply_text(summary, parse_mode="Markdown")
+            
+            # Якщо є telegram_id — надсилаємо учню повідомлення
+            if telegram_id:
+                try:
+                    await update.get_bot().send_message(
+                        chat_id=telegram_id,
+                        text=(
+                            "✅ *Вас зареєстровано в системі автошколи!*\n\n"
+                            f"👤 Ім'я: {name}\n"
+                            f"💰 Ваш тариф: {tariff} грн/год\n\n"
+                            "Натисніть /start щоб розпочати роботу з ботом."
+                        ),
+                        parse_mode="Markdown"
+                    )
+                    await update.message.reply_text(
+                        "📤 Учню надіслано повідомлення про реєстрацію."
+                    )
+                except Exception as e:
+                    logger.warning(f"Не вдалось надіслати повідомлення учню {telegram_id}: {e}")
+                    await update.message.reply_text(
+                        "⚠️ Учня додано, але надіслати повідомлення не вдалося.\n"
+                        "Можливо, він ще не писав боту — нагадайте учню написати /start."
+                    )
+        else:
+            await update.message.reply_text("❌ Помилка збереження. Спробуйте ще раз.")
+            
+    except Exception as e:
+        logger.error(f"Error in handle_admin_add_student_tgid: {e}", exc_info=True)
+        await update.message.reply_text(f"❌ Помилка: {e}")
+    
+    context.user_data.pop("new_student", None)
+    await show_admin_panel(update, context)
 
 # ======================= ADMIN MANAGE BOOKINGS =======================
 async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEFAULT_TYPE):
