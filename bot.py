@@ -79,7 +79,7 @@ def get_student_by_phone(phone):
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT id, name, phone, student_tariff, transmission
+                SELECT id, name, phone, tariff, registered_via
                 FROM students
                 WHERE phone = ?
             """, (phone,))
