@@ -387,7 +387,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "⛔ *Самостійна реєстрація заблокована*\n\n"
                 "Для внесення вас в систему зверніться до адміністратора автошколи.\n\n"
-                "📞 Контакт адміністратора: @InstructorIFBot",
+                "📞 Контакт адміністратора: +380677499988/+380505475557",
                 parse_mode="Markdown"
             )
             return
