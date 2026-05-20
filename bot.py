@@ -3457,10 +3457,9 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
     
     if student:
         # Учень знайдений
-        student_id, name, student_phone, tariff, transmission = student
+        student_id, name, student_phone, tariff, registered_via = student
         context.user_data["admin_booking"]["name"] = name
         context.user_data["admin_booking"]["tariff"] = tariff
-        context.user_data["admin_booking"]["transmission"] = transmission
         context.user_data["admin_booking"]["existing_student"] = True
         
         keyboard = [
@@ -3473,7 +3472,6 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
             f"✅ *Знайдено учня:*\n\n"
             f"👤 Ім'я: {name}\n"
             f"📱 Телефон: {phone}\n"
-            f"🚗 Коробка: {transmission}\n"
             f"💰 Тариф: {tariff} грн/год\n\n"
             f"Підтвердити?",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
@@ -3507,29 +3505,14 @@ async def handle_admin_manual_confirm_student(update: Update, context: ContextTy
         return
     
     if text == "✅ Так, це той учень":
-        # Переходимо до вибору інструктора (коробка вже відома)
-        transmission = context.user_data["admin_booking"]["transmission"]
-        instructors = get_instructors_by_transmission(transmission)
-        
-        if not instructors:
-            await update.message.reply_text("😔 Немає інструкторів для цього типу.")
-            return
-        
-        keyboard = []
-        for instructor in instructors:
-            rating = get_instructor_rating(instructor)
-            if rating > 0:
-                stars = "⭐" * int(rating)
-                keyboard.append([KeyboardButton(f"{instructor} {stars} ({rating:.1f})")])
-            else:
-                keyboard.append([KeyboardButton(f"{instructor} 🆕")])
-        keyboard.append([KeyboardButton("🔙 Назад")])
-        
-        context.user_data["state"] = "admin_manual_select_instructor"
+        # Запитуємо тип коробки (в таблиці students її немає)
+        keyboard = [
+            [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        context.user_data["state"] = "admin_manual_select_transmission"
         await update.message.reply_text(
-            f"🚗 *Крок 3/7: Інструктор*\n\n"
-            f"Коробка: {transmission}\n"
-            f"Оберіть інструктора:",
+            f"🚗 *Крок 3/7: Тип коробки*\n\nОберіть тип коробки передач:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
         )
@@ -3558,7 +3541,6 @@ async def handle_admin_manual_enter_name(update: Update, context: ContextTypes.D
     context.user_data["state"] = "admin_manual_select_tariff"
     
     keyboard = [
-        [KeyboardButton("💰 490 грн/год")],
         [KeyboardButton("💰 490 грн/год")],
         [KeyboardButton("💰 550 грн/год")],
         [KeyboardButton("🔙 Назад")]
