@@ -3825,6 +3825,8 @@ async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFA
     
     instructor_id = instructor_data[0]
     
+    student_telegram_id = booking.get("student_telegram_id")
+    
     # Створюємо урок
     try:
         with get_db() as conn:
@@ -3832,7 +3834,7 @@ async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFA
             cursor.execute("""
                 INSERT INTO lessons 
                 (student_name, student_phone, student_tariff, instructor_id, date, time, duration, status, student_telegram_id, booking_comment)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', NULL, 'Запис адміном')
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, 'Запис адміном')
             """, (
                 booking["name"],
                 booking["phone"],
@@ -3840,17 +3842,39 @@ async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFA
                 instructor_id,
                 booking["date"],
                 booking["time"],
-                booking["duration"]
+                booking["duration"],
+                student_telegram_id
             ))
             conn.commit()
+        
+        # Надсилаємо сповіщення учню якщо є telegram_id
+        if student_telegram_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=student_telegram_id,
+                    text=(
+                        f"✅ *Вас записано на заняття!*\n\n"
+                        f"👨‍🏫 Інструктор: {booking['instructor']}\n"
+                        f"📅 Дата: {booking['date']}\n"
+                        f"🕐 Час: {booking['time']}\n"
+                        f"⏱ Тривалість: {booking['duration']}\n\n"
+                        f"Гарного навчання! 🚗"
+                    ),
+                    parse_mode="Markdown"
+                )
+                notify_status = "📱 Учню надіслано сповіщення ✅"
+            except Exception as e:
+                logger.error(f"Не вдалось надіслати повідомлення учню {student_telegram_id}: {e}")
+                notify_status = f"⚠️ Не вдалось сповістити учня — зателефонуйте: {booking['phone']}"
+        else:
+            notify_status = f"📞 Зателефонуйте учню: {booking['phone']}"
         
         await update.message.reply_text(
             f"✅ *Запис створено!*\n\n"
             f"📋 Деталі:\n"
             f"{booking['name']} → {booking['instructor']}\n"
             f"{booking['date']} {booking['time']} ({booking['duration']})\n\n"
-            f"📞 *Зателефонуйте учню:*\n"
-            f"{booking['phone']}",
+            f"{notify_status}",
             parse_mode="Markdown"
         )
         
