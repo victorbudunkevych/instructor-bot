@@ -3799,8 +3799,7 @@ async def handle_admin_manual_select_duration(update: Update, context: ContextTy
         f"🕐 Час: {booking['time']}\n"
         f"⏱ Тривалість: {text}\n"
         f"💰 Вартість: {price:.0f} грн\n\n"
-        f"⚠️ *Учень НЕ отримає автоматичне повідомлення*\n"
-        f"Зателефонуйте йому самостійно!",
+        f"{'📱 Учня буде сповіщено автоматично ✅' if booking.get('student_telegram_id') else '⚠️ Учень НЕ отримає повідомлення — зателефонуйте самостійно!'}",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         parse_mode="Markdown"
     )
