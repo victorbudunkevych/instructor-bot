@@ -78,11 +78,12 @@ def get_student_by_phone(phone):
     try:
         with get_db() as conn:
             cursor = conn.cursor()
+            digits = ''.join(filter(str.isdigit, phone))[-9:]
             cursor.execute("""
-                SELECT id, name, phone, tariff, registered_via
+                SELECT id, name, phone, tariff, registered_via, telegram_id
                 FROM students
-                WHERE phone = ?
-            """, (phone,))
+                WHERE REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), ' ', '') LIKE ?
+            """, (f'%{digits}',))
             return cursor.fetchone()
     except Exception as e:
         logger.error(f"Error in get_student_by_phone: {e}")
@@ -3457,10 +3458,11 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
     
     if student:
         # Учень знайдений
-        student_id, name, student_phone, tariff, registered_via = student
+        student_id, name, student_phone, tariff, registered_via, student_tg_id = student
         context.user_data["admin_booking"]["name"] = name
         context.user_data["admin_booking"]["tariff"] = tariff
         context.user_data["admin_booking"]["existing_student"] = True
+        context.user_data["admin_booking"]["student_telegram_id"] = student_tg_id
         
         keyboard = [
             [KeyboardButton("✅ Так, це той учень")],
