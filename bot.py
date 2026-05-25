@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from contextlib import contextmanager
 from io import BytesIO
 
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder, 
     CommandHandler, 
@@ -4616,7 +4616,8 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                         chat_id=student_id,
                         text=f"⏰ *Нагадування!*\n\nУ вас заняття завтра:\n"
                              f"👨‍🏫 {instructor}\n📅 {date}\n🕐 {time}",
-                        parse_mode="Markdown"
+                        parse_mode="Markdown",
+                        reply_markup=ReplyKeyboardRemove()
                     )
                     
                     cursor.execute("UPDATE lessons SET reminder_24h_sent = 1 WHERE id = ?", (lesson_id,))
@@ -4664,7 +4665,8 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                         text=f"🔔 *Нагадування!*\n\nУ вас заняття через 2 години:\n"
                              f"👨‍🏫 {instructor}\n📅 {date}\n🕐 {time}\n\n"
                              f"⏰ Не забудьте підготуватися!",
-                        parse_mode="Markdown"
+                        parse_mode="Markdown",
+                        reply_markup=ReplyKeyboardRemove()
                     )
                     
                     cursor.execute("UPDATE lessons SET reminder_2h_sent = 1 WHERE id = ?", (lesson_id,))
