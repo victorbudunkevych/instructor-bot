@@ -2681,13 +2681,14 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
         keyboard = []
         for inst_id, inst_name in instructors:
             keyboard.append([KeyboardButton(f"👤 {inst_name}")])
+        keyboard.append([KeyboardButton("📋 Звіт по всіх інструкторах")])
         keyboard.append([KeyboardButton("🔙 Назад")])
         
         context.user_data["state"] = "admin_select_instructor_report"
         context.user_data["instructor_list"] = {inst_name: inst_id for inst_id, inst_name in instructors}
         
         await update.message.reply_text(
-            "👤 Оберіть інструктора:",
+            "👤 Оберіть інструктора або сформуйте звіт по всіх:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
         return
@@ -2763,7 +2764,12 @@ async def handle_instructor_custom_period(update: Update, context: ContextTypes.
         
         instructor_id = context.user_data.get("selected_instructor_id")
         instructor_name = context.user_data.get("selected_instructor_name")
-        await generate_instructor_report(update, context, instructor_id, instructor_name, date_from, date_to, period_text)
+        
+        if context.user_data.get("all_instructors_report"):
+            context.user_data.pop("all_instructors_report", None)
+            await generate_all_instructors_report(update, context, date_from, date_to, period_text)
+        else:
+            await generate_instructor_report(update, context, instructor_id, instructor_name, date_from, date_to, period_text)
     except Exception as e:
         await update.message.reply_text("❌ Невірний формат. Введіть: ДД.ММ.РРРР - ДД.ММ.РРРР")
 
@@ -2776,6 +2782,25 @@ async def handle_instructor_report_select(update: Update, context: ContextTypes.
         await show_admin_panel(update, context)
         return
     
+    # Звіт по всіх інструкторах
+    if text == "📋 Звіт по всіх інструкторах":
+        context.user_data["selected_instructor_id"] = None
+        context.user_data["selected_instructor_name"] = "Всі інструктори"
+        context.user_data["all_instructors_report"] = True
+        context.user_data["state"] = "admin_instructor_report_period"
+        
+        keyboard = [
+            [KeyboardButton("📊 За тиждень")],
+            [KeyboardButton("📊 За місяць")],
+            [KeyboardButton("📊 Свій період")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        await update.message.reply_text(
+            "📋 Звіт по всіх інструкторах\nОберіть період:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+    
     # Витягуємо ім'я з кнопки (прибираємо emoji "👤 ")
     instructor_name = text.replace("👤 ", "").strip()
     instructor_list = context.user_data.get("instructor_list", {})
@@ -2786,6 +2811,7 @@ async def handle_instructor_report_select(update: Update, context: ContextTypes.
     
     context.user_data["selected_instructor_id"] = instructor_list[instructor_name]
     context.user_data["selected_instructor_name"] = instructor_name
+    context.user_data["all_instructors_report"] = False
     context.user_data["state"] = "admin_instructor_report_period"
     
     keyboard = [
@@ -2829,7 +2855,85 @@ async def handle_instructor_report_period(update: Update, context: ContextTypes.
     
     instructor_id = context.user_data.get("selected_instructor_id")
     instructor_name = context.user_data.get("selected_instructor_name")
-    await generate_instructor_report(update, context, instructor_id, instructor_name, date_from, date_to, period_text)
+    
+    if context.user_data.get("all_instructors_report"):
+        context.user_data.pop("all_instructors_report", None)
+        await generate_all_instructors_report(update, context, date_from, date_to, period_text)
+    else:
+        await generate_instructor_report(update, context, instructor_id, instructor_name, date_from, date_to, period_text)
+
+async def generate_all_instructors_report(update: Update, context: ContextTypes.DEFAULT_TYPE, date_from, date_to, period_text):
+    """Зведений звіт по всіх інструкторах"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name FROM instructors WHERE is_active = 1 ORDER BY name")
+            instructors = cursor.fetchall()
+
+        if not instructors:
+            await update.message.reply_text("❌ Інструкторів не знайдено.")
+            return
+
+        period_from = datetime.strptime(date_from, "%Y-%m-%d").strftime("%d.%m.%Y")
+        period_to = datetime.strptime(date_to, "%Y-%m-%d").strftime("%d.%m.%Y")
+
+        total_lessons = 0
+        total_hours = 0.0
+        total_earnings = 0.0
+        total_cancelled = 0
+        ratings = []
+
+        text = f"📋 *Звіт по всіх інструкторах*\n"
+        text += f"📅 {period_from} — {period_to}\n"
+        text += "─────────────────\n\n"
+
+        for inst_id, name in instructors:
+            data = get_instructor_report(inst_id, date_from, date_to)
+            if not data or data['total_lessons'] == 0:
+                continue
+
+            hours = data['total_hours'] or 0
+            earnings = data['earnings'] or 0
+            cancelled = data['cancelled'] or 0
+            avg_rating = data['avg_rating']
+
+            text += f"👤 *{name}*\n"
+            text += f"   📝 Занять: {data['total_lessons']}  ⏱ Годин: {hours:.1f}\n"
+            text += f"   💰 Заробіток: {earnings:.0f} грн"
+            if avg_rating:
+                text += f"  ⭐ {avg_rating:.1f}"
+            if cancelled:
+                text += f"  ❌ Скас.: {cancelled}"
+            text += "\n\n"
+
+            total_lessons += data['total_lessons']
+            total_hours += hours
+            total_earnings += earnings
+            total_cancelled += cancelled
+            if avg_rating:
+                ratings.append(avg_rating)
+
+        if total_lessons == 0:
+            await update.message.reply_text("📋 Немає даних за цей період.")
+            await show_admin_panel(update, context)
+            return
+
+        text += "─────────────────\n"
+        text += f"📊 *ЗАГАЛОМ:*\n"
+        text += f"📝 Занять: {total_lessons}\n"
+        text += f"⏱ Годин: {total_hours:.1f}\n"
+        text += f"💰 Заробіток: {total_earnings:.0f} грн\n"
+        if ratings:
+            text += f"⭐ Сер. рейтинг: {sum(ratings)/len(ratings):.1f}\n"
+        if total_cancelled:
+            text += f"❌ Скасовано: {total_cancelled}\n"
+
+        await update.message.reply_text(text, parse_mode="Markdown")
+        await show_admin_panel(update, context)
+
+    except Exception as e:
+        logger.error(f"Error in generate_all_instructors_report: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка генерації зведеного звіту.")
 
 async def generate_instructor_report(update: Update, context: ContextTypes.DEFAULT_TYPE, instructor_id, instructor_name, date_from, date_to, period_text):
     """Генерація детального звіту по одному інструктору"""
