@@ -835,20 +835,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state == "admin_manual_confirm":
             await handle_admin_manual_confirm(update, context)
             return
-        
-        if state == "admin_select_instructor_report":
-            await handle_instructor_report_select(update, context)
-            return
-        if state == "admin_instructor_report_period":
-            await handle_instructor_report_period(update, context)
-            return
-        if state == "admin_instructor_custom_period":
-            await handle_instructor_custom_period(update, context)
-            return
-        if state == "admin_report_period":
-            await handle_admin_report(update, context)
-            return
-        
+
         # === ЕКСПОРТ З ВИБОРОМ ПЕРІОДУ ===
         if state == "export_period":
             await handle_export_period_choice(update, context)
@@ -2897,7 +2884,9 @@ async def generate_all_instructors_report(update: Update, context: ContextTypes.
             cancelled = data['cancelled'] or 0
             avg_rating = data['avg_rating']
 
-            text += f"👤 *{name}*\n"
+            # Екрануємо ім'я — символи _ та * можуть зламати Markdown
+            safe_name = name.replace('_', '\\_').replace('*', '\\*')
+            text += f"👤 *{safe_name}*\n"
             text += f"   📝 Занять: {data['total_lessons']}  ⏱ Годин: {hours:.1f}\n"
             text += f"   💰 Заробіток: {earnings:.0f} грн"
             if avg_rating:
