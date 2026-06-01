@@ -73,6 +73,14 @@ from database import (
 )
 
 # ======================= HELPER FUNCTIONS =======================
+def escape_md(text: str) -> str:
+    """Екранує спецсимволи Markdown v1 для безпечної вставки в *жирний* текст.
+    Telegram Markdown v1 спецсимволи: _ * ` [
+    """
+    if not isinstance(text, str):
+        text = str(text)
+    return text.replace('\\', '\\\\').replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
+
 def get_student_by_phone(phone):
     """Знайти учня за номером телефону"""
     try:
@@ -505,7 +513,7 @@ async def register_student_with_tariff(update: Update, context: ContextTypes.DEF
     logger.info(f"💬 Відправляю запит на введення імені")
     await update.message.reply_text(
         f"🎓 *Реєстрація учня*\n"
-        f"💰 Тариф: *{tariff} грн/год*\n\n"
+        f"💰 Тариф: *{escape_md(tariff)} грн/год*\n\n"
         f"Введіть ваше ім'я та прізвище:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         parse_mode="Markdown"
@@ -667,7 +675,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"✅ *Дякуємо за відгук!*\n\n"
                     f"👨‍🏫 {feedback_data['instructor_name']}\n"
                     f"⭐ Оцінка: {feedback_data['rating']}/5\n"
-                    f"💬 \"{feedback_text}\"",
+                    f"💬 \"{escape_md(feedback_text)}\"",
                     parse_mode="Markdown"
                 )
                 
@@ -724,9 +732,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 await update.message.reply_text(
                     f"✅ *Реєстрацію завершено!*\n\n"
-                    f"👤 Ім'я: {name}\n"
-                    f"📱 Телефон: {phone}\n"
-                    f"💰 Ваш тариф: *{tariff} грн/год* (фіксований)\n\n"
+                    f"👤 Ім'я: {escape_md(name)}\n"
+                    f"📱 Телефон: {escape_md(phone)}\n"
+                    f"💰 Ваш тариф: *{escape_md(tariff)} грн/год* (фіксований)\n\n"
                     f"ℹ️ Тариф закріплений за вами і не змінюється.\n\n"
                     f"Натисніть кнопку нижче, щоб записатися на заняття:",
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
@@ -1718,7 +1726,7 @@ async def show_instructor_schedule_period(update: Update, context: ContextTypes.
                 current_date = date
             
             lesson_text += f"🕐 {time} ({duration})\n"
-            lesson_text += f"👤 {student_name}\n"
+            lesson_text += f"👤 {escape_md(student_name)}\n"
             if student_phone:
                 lesson_text += f"📱 {student_phone}\n"
             if booking_comment:
@@ -1930,7 +1938,7 @@ async def show_cancellation_history(update: Update, context: ContextTypes.DEFAUL
         
         for date, time, student_name, cancelled_by, cancelled_at in cancellations:
             text += f"📅 {date} {time}\n"
-            text += f"👤 {student_name}\n"
+            text += f"👤 {escape_md(student_name)}\n"
             text += f"🚫 Скасував: {cancelled_by}\n"
             if cancelled_at:
                 text += f"🕐 {cancelled_at[:16]}\n"
@@ -2936,7 +2944,7 @@ async def generate_instructor_report(update: Update, context: ContextTypes.DEFAU
         period_from = datetime.strptime(date_from, "%Y-%m-%d").strftime("%d.%m.%Y")
         period_to = datetime.strptime(date_to, "%Y-%m-%d").strftime("%d.%m.%Y")
         
-        text = f"👤 *{instructor_name}*\n"
+        text = f"👤 *{escape_md(instructor_name)}*\n"
         text += f"📅 Період: {period_from} - {period_to}\n\n"
         text += f"📝 Занять: {data['total_lessons']}\n"
         text += f"⏱ Годин: {data['total_hours']}\n"
@@ -2952,7 +2960,7 @@ async def generate_instructor_report(update: Update, context: ContextTypes.DEFAU
                     text += f"\n📆 *{date}*\n"
                     current_date = date
                 status_icon = "✅" if status == "completed" else ("❌" if status == "cancelled" else "🔵")
-                text += f"{status_icon} {time} ({hours}г) - {student_name}"
+                text += f"{status_icon} {time} ({hours}г) - {escape_md(student_name)}"
                 if rating:
                     text += f" ⭐{rating}"
                 text += "\n"
@@ -3087,7 +3095,7 @@ async def handle_admin_add_student_phone(update: Update, context: ContextTypes.D
     ]
     name = context.user_data["new_student"]["name"]
     await update.message.reply_text(
-        f"✅ Ім'я: *{name}*\n"
+        f"✅ Ім'я: *{escape_md(name)}*\n"
         f"✅ Телефон: *{text.strip()}*\n\n"
         "Крок 3 з 4: Оберіть тариф учня:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
@@ -3122,9 +3130,9 @@ async def handle_admin_add_student_tariff(update: Update, context: ContextTypes.
     name = context.user_data["new_student"]["name"]
     phone = context.user_data["new_student"]["phone"]
     await update.message.reply_text(
-        f"✅ Ім'я: *{name}*\n"
-        f"✅ Телефон: *{phone}*\n"
-        f"✅ Тариф: *{tariff} грн/год*\n\n"
+        f"✅ Ім'я: *{escape_md(name)}*\n"
+        f"✅ Телефон: *{escape_md(phone)}*\n"
+        f"✅ Тариф: *{escape_md(tariff)} грн/год*\n\n"
         "Крок 4 з 4: Введіть Telegram ID учня\n\n"
         "_(якщо учень вже писав боту — попросіть його переслати будь-яке повідомлення боту, "
         "або знайдіть ID у логах. Якщо не знаєте — пропустіть)_",
@@ -3176,9 +3184,9 @@ async def handle_admin_add_student_tgid(update: Update, context: ContextTypes.DE
             # Формуємо підсумок
             summary = (
                 f"✅ *Учня успішно додано!*\n\n"
-                f"👤 Ім'я: {name}\n"
-                f"📱 Телефон: {phone}\n"
-                f"💰 Тариф: {tariff} грн/год\n"
+                f"👤 Ім'я: {escape_md(name)}\n"
+                f"📱 Телефон: {escape_md(phone)}\n"
+                f"💰 Тариф: {escape_md(tariff)} грн/год\n"
             )
             if telegram_id:
                 summary += f"🆔 Telegram ID: {telegram_id}\n"
@@ -3194,8 +3202,8 @@ async def handle_admin_add_student_tgid(update: Update, context: ContextTypes.DE
                         chat_id=telegram_id,
                         text=(
                             "✅ *Вас зареєстровано в системі автошколи!*\n\n"
-                            f"👤 Ім'я: {name}\n"
-                            f"💰 Ваш тариф: {tariff} грн/год\n\n"
+                            f"👤 Ім'я: {escape_md(name)}\n"
+                            f"💰 Ваш тариф: {escape_md(tariff)} грн/год\n\n"
                             "Натисніть /start щоб розпочати роботу з ботом."
                         ),
                         parse_mode="Markdown"
@@ -3565,9 +3573,9 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
         
         await update.message.reply_text(
             f"✅ *Знайдено учня:*\n\n"
-            f"👤 Ім'я: {name}\n"
-            f"📱 Телефон: {phone}\n"
-            f"💰 Тариф: {tariff} грн/год\n\n"
+            f"👤 Ім'я: {escape_md(name)}\n"
+            f"📱 Телефон: {escape_md(phone)}\n"
+            f"💰 Тариф: {escape_md(tariff)} грн/год\n\n"
             f"Підтвердити?",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
@@ -3580,7 +3588,7 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
         
         await update.message.reply_text(
             f"❌ *Учня не знайдено*\n\n"
-            f"📱 Телефон: {phone}\n\n"
+            f"📱 Телефон: {escape_md(phone)}\n\n"
             f"📝 *Крок 2/7: Ім'я учня*\n"
             f"Введіть ім'я та прізвище:",
             reply_markup=ReplyKeyboardMarkup([[KeyboardButton("🔙 Назад")]], resize_keyboard=True),
@@ -4199,7 +4207,7 @@ async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_T
         
         for i, (lesson_id, date, time, duration, instructor_name, hours_until) in enumerate(cancelable_lessons, 1):
             text += f"{i}. {date} {time} ({duration})\n"
-            text += f"   👨‍🏫 {instructor_name}\n"
+            text += f"   👨‍🏫 {escape_md(instructor_name)}\n"
             text += f"   ⏰ Залишилось {int(hours_until)} год\n\n"
             keyboard.append([KeyboardButton(f"{i}")])
         
@@ -4252,7 +4260,7 @@ async def handle_cancel_lesson(update: Update, context: ContextTypes.DEFAULT_TYP
             f"📅 Дата: {date}\n"
             f"🕐 Час: {time}\n"
             f"⏱ Тривалість: {duration}\n"
-            f"👨‍🏫 Інструктор: {instructor_name}\n\n"
+            f"👨‍🏫 Інструктор: {escape_md(instructor_name)}\n\n"
             f"Скасувати урок?",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
@@ -4325,7 +4333,7 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_text(
             f"✅ *Урок скасовано!*\n\n"
             f"📅 {date} {time}\n"
-            f"👨‍🏫 {instructor_name}",
+            f"👨‍🏫 {escape_md(instructor_name)}",
             parse_mode="Markdown"
         )
         
@@ -4343,7 +4351,7 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                 await context.bot.send_message(
                     chat_id=instructor_telegram_id,
                     text=f"🔔 *Урок скасовано учнем*\n\n"
-                         f"👤 Учень: {student_name}\n"
+                         f"👤 Учень: {escape_md(student_name)}\n"
                          f"📱 Телефон: {student_phone}\n"
                          f"📅 Дата: {date}\n"
                          f"🕐 Час: {time}\n"
@@ -4583,7 +4591,7 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Повідомлення учню (БЕЗ особистих даних)
         await update.message.reply_text(
             f"✅ *Заняття заброньовано!*\n\n"
-            f"👨‍🏫 Інструктор: {instructor_name}\n"
+            f"👨‍🏫 Інструктор: {escape_md(instructor_name)}\n"
             f"📅 Дата: {date}\n"
             f"🕐 Час: {time}\n"
             f"⏱ Тривалість: {duration}",
@@ -4606,7 +4614,7 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 message_text = (
                     f"🔔 *Новий запис!*\n\n"
-                    f"👤 Учень: {student_name}\n"
+                    f"👤 Учень: {escape_md(student_name)}\n"
                     f"📱 Телефон: {student_phone}\n"
                     f"📅 Дата: {date}\n"
                     f"🕐 Час: {time}\n"
@@ -4786,7 +4794,7 @@ async def send_rating_request_to_student(context, student_tg_id, lesson_id, date
             chat_id=student_tg_id,
             text=f"✅ *Урок завершено!*\n\n"
                  f"📅 {date} {time}\n"
-                 f"👨‍🏫 {instructor_name}\n\n"
+                 f"👨‍🏫 {escape_md(instructor_name)}\n\n"
                  f"⭐ Оцініть інструктора:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
