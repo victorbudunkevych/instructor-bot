@@ -2896,7 +2896,7 @@ async def generate_admin_report(update: Update, context: ContextTypes.DEFAULT_TY
                 text += f"   📝 Занять: {lessons}\n"
                 text += f"   ⏱ Годин: {hours:.1f}\n"
                 text += f"   💰 Заробіток: {earnings:.0f} грн\n"
-                text += f"   ⭐ Рейтинг: {avg_rating:.1f if avg_rating else 0}\n"
+                text += f"   ⭐ Рейтинг: {avg_rating:.1f if avg_rating else '0.0'}\n"
                 text += f"   ❌ Скасовано: {cancelled}\n\n"
                 
                 total_lessons += lessons
@@ -5641,29 +5641,16 @@ def main():
             def log_message(self, format, *args):
                 pass  # Вимикаємо логи HTTP сервера
         
-        # Запускаємо бота в окремому потоці з новим event loop
-        def run_bot():
-            import asyncio
-            # Створюємо новий event loop для цього потоку
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                # Запускаємо без signal handlers (вони не працюють в потоках)
-                app.run_polling(drop_pending_updates=True, stop_signals=None)
-            finally:
-                loop.close()
-        
-        bot_thread = threading.Thread(target=run_bot, daemon=True)
-        bot_thread.start()
-        
-        # Запускаємо HTTP сервер на порту 8080 (для Render)
+        # Запускаємо HTTP сервер в окремому потоці
         port = int(os.environ.get('PORT', 8080))
         server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
         logger.info(f"🌐 HTTP сервер запущено на порту {port}")
         print(f"🌐 HTTP сервер запущено на порту {port}")
         
-        # Блокуємо головний потік HTTP сервером
-        server.serve_forever()
+        # Запускаємо polling в головному потоці (один екземпляр!)
+        app.run_polling(drop_pending_updates=True, stop_signals=None)
     
     except Exception as e:
         logger.error(f"Critical error: {e}", exc_info=True)
