@@ -23,7 +23,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 
 # ==================== PRODUCTION КОНФІГУРАЦІЯ ====================
 # PRODUCTION БОТ TOKEN
-TOKEN = "8337801301:AAGXhZVzyoqjED_taA2qqgtaxg8eGeFqiWQ"
+TOKEN = "TOKEN = "8676112449:AAHu6vqV7JK4-8HZvOAM67e_23ZJFsSImqM"
 ADMIN_ID = [
     669706811,   # Віктор (власник)
     280240917,   # Шепшелей Владислав
