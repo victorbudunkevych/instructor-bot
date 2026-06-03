@@ -2676,35 +2676,66 @@ async def generate_all_instructors_report(
         )
         await update.message.reply_text(header, parse_mode="Markdown")
 
+        CLEAN_RATE = 420   # чистий дохід за годину
+        AMORT_RATE = 70    # амортизація за годину
+
         grand_lessons  = 0
         grand_hours    = 0.0
-        grand_earnings = 0.0
+        grand_zagalno  = 0.0
+        grand_clean    = 0.0
+        grand_amort    = 0.0
 
         for inst_id, inst_name in instructors:
             data = get_instructor_report(inst_id, date_from, date_to)
             if not data or data["total_lessons"] == 0:
                 continue  # Пропускаємо інструкторів без занять за період
 
-            grand_lessons  += data["total_lessons"]
-            grand_hours    += data["total_hours"]
-            grand_earnings += data["earnings"]
+            # Рахуємо загальну суму по тарифах учнів з БД
+            from database import _date_in_range
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT date, duration, student_tariff
+                    FROM lessons
+                    WHERE instructor_id = ?
+                    AND status IN ('active', 'completed')
+                """, (inst_id,))
+                cursor2_rows = cursor.fetchall()
+
+            inst_zagalno = 0.0
+            for row_date, row_dur, row_tariff in cursor2_rows:
+                if not _date_in_range(row_date, date_from, date_to):
+                    continue
+                h = 1.5 if row_dur and '1.5' in str(row_dur) else (2.0 if row_dur and '2' in str(row_dur) else 1.0)
+                tariff = row_tariff or 490
+                inst_zagalno += h * tariff
+
+            inst_hours  = data["total_hours"]
+            inst_clean  = inst_hours * CLEAN_RATE
+            inst_amort  = inst_zagalno - inst_clean
+
+            grand_lessons += data["total_lessons"]
+            grand_hours   += inst_hours
+            grand_zagalno += inst_zagalno
+            grand_clean   += inst_clean
+            grand_amort   += inst_amort
 
             # Блок одного інструктора
             lines = [f"━━━ 👨‍🏫 *{inst_name}* ━━━"]
 
             if data["details"]:
                 current_date = None
-                for date, time, hours, student_name, status, rating in data["details"]:
-                    if date != current_date:
-                        lines.append(f"\n📆 *{date}*")
-                        current_date = date
+                for det_date, det_time, det_hours, student_name, status, rating in data["details"]:
+                    if det_date != current_date:
+                        lines.append(f"\n📆 *{det_date}*")
+                        current_date = det_date
 
                     status_icon = (
                         "✅" if status == "completed" else
                         "❌" if status == "cancelled" else
                         "🔵"
                     )
-                    line = f"{status_icon} {time} ({hours}г) – {student_name}"
+                    line = f"{status_icon} {det_time} ({det_hours}г) – {student_name}"
                     if rating:
                         line += f" ⭐{rating}"
                     lines.append(line)
@@ -2713,10 +2744,10 @@ async def generate_all_instructors_report(
             avg = data["avg_rating"]
             rating_str = f"{avg:.1f}" if avg else "–"
             lines.append(
-                f"\n📝 {data['total_lessons']} | "
-                f"⏱ {data['total_hours']}г | "
-                f"💰 {data['earnings']:.0f} грн | "
-                f"⭐ {rating_str}"
+                f"\n📝 {data['total_lessons']} | ⏱ {inst_hours}г | ⭐ {rating_str}\n"
+                f"💰 Загально: {inst_zagalno:.0f} грн\n"
+                f"💵 Чистими: {inst_clean:.0f} грн\n"
+                f"🔧 Амортизація: {inst_amort:.0f} грн"
             )
 
             # Розбиваємо на шматки по 3500 символів (ліміт Telegram ~4096)
@@ -2741,9 +2772,10 @@ async def generate_all_instructors_report(
             summary = (
                 f"──────────────────\n"
                 f"📊 *РАЗОМ {period_text}:*\n"
-                f"📝 {grand_lessons} занять  |  "
-                f"⏱ {grand_hours:.1f} год  |  "
-                f"💰 {grand_earnings:.0f} грн"
+                f"📝 {grand_lessons} занять  |  ⏱ {grand_hours:.1f} год\n"
+                f"💰 Загально: {grand_zagalno:.0f} грн\n"
+                f"💵 Чистими: {grand_clean:.0f} грн\n"
+                f"🔧 Амортизація: {grand_amort:.0f} грн"
             )
         await update.message.reply_text(summary, parse_mode="Markdown")
         await show_admin_panel(update, context)
