@@ -33,13 +33,12 @@ ADMIN_ID = [
 TIMEZONE = "Europe/Kyiv"
 
 # БАЗА ДАНИХ НА PERSISTENT DISK
-# Якщо є диск /var/data - використовуємо його, якщо ні - локально
 import os
 if os.path.exists("/var/data"):
-    DB_NAME = "/var/data/driving_school.db"  # На Render з Persistent Disk
+    DB_NAME = "/var/data/driving_school.db"
     print("✅ Використовую Persistent Disk: /var/data/driving_school.db")
 else:
-    DB_NAME = "driving_school.db"  # Локально для розробки
+    DB_NAME = "driving_school.db"
     print("⚠️ Persistent Disk не знайдено, використовую локальну БД")
 # ==================================================================
 
@@ -60,7 +59,7 @@ from database import (
     get_instructor_by_name,
     get_instructor_by_telegram_id,
     get_instructor_rating,
-    get_db as _original_get_db,  # Імпортуємо оригінальний
+    get_db as _original_get_db,
     init_schedule_blocks_table,
     get_instructor_stats_period,
     get_admin_report_by_instructors,
@@ -174,54 +173,39 @@ def is_instructor(telegram_id):
 
 # ======================= HELPERS =======================
 def get_next_dates(days=14, instructor_name=None):
-    """Генерує список дат на найближчі N днів з кількістю вільних годин
-    
-    Календар оновлюється о 8:00 ранку:
-    - До 8:00 - показує 14 днів від ВЧОРА (щоб було 14 днів доступних)
-    - Після 8:00 - показує 14 днів від СЬОГОДНІ (новий 14-й день додається)
-    """
+    """Генерує список дат на найближчі N днів з кількістю вільних годин"""
     dates = []
     now = datetime.now(TZ)
     
-    # ✅ ВИПРАВЛЕНО: Календар оновлюється о 8:00
     if now.hour < 8:
-        # До 8:00 ранку - рахуємо від вчора (щоб показувати 14 днів)
         start_date = now.date() - timedelta(days=1)
     else:
-        # Після 8:00 - рахуємо від сьогодні (14-й день додається)
         start_date = now.date()
     
     for i in range(days):
         date = start_date + timedelta(days=i)
         
-        # Пропускаємо дати в минулому
         if date < now.date():
             continue
             
         date_formatted = date.strftime('%d.%m.%Y')
-        
-        # Форматуємо дату: "Пн 13.12.2024"
         weekday = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"][date.weekday()]
         
-        # ✅ ДОДАНО: Виділення вихідних кольоровими блоками
-        if date.weekday() == 5:  # Субота
+        if date.weekday() == 5:
             weekday_display = f"🟦 {weekday}"
-        elif date.weekday() == 6:  # Неділя
+        elif date.weekday() == 6:
             weekday_display = f"🟥 {weekday}"
         else:
             weekday_display = weekday
         
-        # Якщо передано інструктора - рахуємо вільні години
         if instructor_name:
             free_slots = get_available_time_slots(instructor_name, date_formatted)
             free_count = len(free_slots)
             
-            # Показуємо тільки дні з вільними годинами
             if free_count > 0:
                 formatted = f"{weekday_display} {date.strftime('%d.%m')} ({free_count})"
                 dates.append(formatted)
         else:
-            # Без інструктора - просто дата
             formatted = f"{weekday_display} {date.strftime('%d.%m.%Y')}"
             dates.append(formatted)
     
@@ -236,31 +220,23 @@ def get_available_time_slots(instructor_name, date_str):
         
         instructor_id = instructor_data[0]
         
-        # Перевіряємо чи це сьогодні (з правильною таймзоною)
         date_obj = datetime.strptime(date_str, "%d.%m.%Y")
         now = datetime.now(TZ)
         is_today = date_obj.date() == now.date()
         
-        # Всі можливі слоти
         all_slots = []
         
-        # Якщо це сьогодні - слоти мають бути мінімум через 1 годину
         if is_today:
-            # Поточний час + 1 година
             min_time = now + timedelta(hours=1)
             min_hour = min_time.hour
             
-            # Якщо є хвилини - починаємо з наступної години
             if min_time.minute > 0:
                 min_hour += 1
             
-            # ЗАВЖДИ не раніше робочих годин (8:00)
             start_hour = max(min_hour, WORK_HOURS_START)
         else:
-            # Завтра або пізніше - завжди з робочих годин
             start_hour = WORK_HOURS_START
         
-        # Додаткова перевірка: якщо час до 8:00 - починаємо з 8:00
         if start_hour < WORK_HOURS_START:
             start_hour = WORK_HOURS_START
         
@@ -269,7 +245,6 @@ def get_available_time_slots(instructor_name, date_str):
             all_slots.append(f"{hour:02d}:00")
             hour += 1
         
-        # Перевіряємо які зайняті
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -278,7 +253,6 @@ def get_available_time_slots(instructor_name, date_str):
             """, (instructor_id, date_str))
             booked = cursor.fetchall()
         
-        # Створюємо список зайнятих годин з урахуванням тривалості
         blocked_hours = set()
         for booked_time, duration in booked:
             if ':' not in booked_time:
@@ -286,19 +260,16 @@ def get_available_time_slots(instructor_name, date_str):
             
             start_h = int(booked_time.split(':')[0])
             
-            # Визначаємо скільки годин займає заняття
             if "1.5" in duration:
-                hours_blocked = 2  # 1.5 години блокує 2 слоти
+                hours_blocked = 2
             elif "2" in duration:
                 hours_blocked = 2
             else:
                 hours_blocked = 1
             
-            # Блокуємо всі години заняття
             for i in range(hours_blocked):
                 blocked_hours.add(f"{start_h + i:02d}:00")
         
-        # Перевіряємо заблоковані інструктором
         from database import is_time_blocked
         date_formatted = date_obj.strftime("%Y-%m-%d")
         
@@ -342,10 +313,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     logger.info(f"🟢 START викликано! User: {user_id}, Args: {context.args}")
     
-    # ✅ СПОЧАТКУ перевіряємо чи це адмін (НЕ інструктор, а саме адмін)
-    # Адміни отримують панель адміна незалежно від deep links
     if is_admin(user_id):
-        # Перевіряємо чи адмін також є інструктором
         try:
             with get_db() as conn:
                 cursor = conn.cursor()
@@ -353,7 +321,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 is_instructor = cursor.fetchone() is not None
             
             if is_instructor:
-                # Адмін-інструктор - показуємо панель інструктора з доступом до адмін-панелі
                 keyboard = [
                     [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")],
                     [KeyboardButton("📅 Мій розклад")],
@@ -366,7 +333,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text = "Привіт! 👋 Я бот *Автоінструктор*.\n\n👨‍🏫 *Панель інструктора*\n🔐 *Панель адміністратора*\n\nОберіть дію:"
                 context.user_data["state"] = "waiting_for_transmission"
             else:
-                # Тільки адмін (не інструктор) - показуємо панель адміна одразу
                 await show_admin_panel(update, context)
                 return
             
@@ -379,7 +345,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Error checking admin status: {e}", exc_info=True)
     
-    # Обробка deep links — реєстрація через посилання ЗАБЛОКОВАНА
     if context.args:
         command = context.args[0]
         logger.info(f"🔗 Deep link виявлено: {command} — доступ заблоковано")
@@ -400,7 +365,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (user_id,))
             is_instructor = cursor.fetchone() is not None
 
-        # Для інструкторів - показуємо панель
         if is_instructor:
             keyboard = [
                 [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")],
@@ -420,11 +384,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
         else:
-            # Для учнів - спочатку перевіряємо чи зареєстрований
             student = get_student_by_telegram_id(user_id)
             
             if student:
-                # Вже зареєстрований - показуємо меню
                 context.user_data["student_name"] = student[1]
                 context.user_data["student_phone"] = student[2]
                 context.user_data["student_tariff"] = student[3]
@@ -443,7 +405,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
             else:
-                # Не зареєстрований - повідомляємо що треба звернутись до адміна
                 await update.message.reply_text(
                     "⛔ *Ви не зареєстровані в системі*\n\n"
                     "Для отримання доступу зверніться до адміністратора автошколи — "
@@ -475,7 +436,6 @@ async def register_student_with_tariff(update: Update, context: ContextTypes.DEF
     user_id = user.id
     logger.info(f"🟡 register_student_with_tariff викликано! User: {user_id}, Tariff: {tariff}")
     
-    # Перевіряємо чи вже зареєстрований
     student = get_student_by_telegram_id(user_id)
     
     if student:
@@ -488,7 +448,6 @@ async def register_student_with_tariff(update: Update, context: ContextTypes.DEF
         )
         return
     
-    # Автозаповнення імені та номера телефону
     auto_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
     auto_phone = user.username if user.username else ""
     logger.info(f"📝 Автозаповнення: name={auto_name}, username={auto_phone}")
@@ -522,12 +481,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         # === ОЦІНЮВАННЯ ІНСТРУКТОРА УЧНЕМ ===
-        # Крок 1: Отримання оцінки
         if text in ["⭐", "⭐⭐", "⭐⭐⭐", "⭐⭐⭐⭐", "⭐⭐⭐⭐⭐"]:
             lesson_data = context.bot_data.get(f"rating_lesson_{user_id}")
             
             if lesson_data:
-                # Визначаємо оцінку
                 rating_map = {
                     "⭐": 1,
                     "⭐⭐": 2,
@@ -537,7 +494,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
                 rating = rating_map.get(text, 5)
                 
-                # Зберігаємо оцінку в БД
                 with get_db() as conn:
                     cursor = conn.cursor()
                     cursor.execute("""
@@ -547,20 +503,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     """, (rating, lesson_data['lesson_id']))
                     conn.commit()
                 
-                # Зберігаємо оцінку в контексті для можливого коментаря
                 context.bot_data[f"rating_feedback_{user_id}"] = {
                     'lesson_id': lesson_data['lesson_id'],
                     'instructor_name': lesson_data['instructor_name'],
                     'rating': rating
                 }
                 
-                # Видаляємо попередній контекст
                 del context.bot_data[f"rating_lesson_{user_id}"]
                 
-                # Встановлюємо стан для коментаря
                 context.user_data["state"] = "rating_feedback"
                 
-                # Запитуємо коментар
                 keyboard = [
                     [KeyboardButton("✍️ Написати коментар")],
                     [KeyboardButton("⏭️ Пропустити")]
@@ -579,7 +531,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 logger.warning(f"⚠️ Учень {user_id} надіслав оцінку але немає lesson_data")
         
-        # Пропуск оцінювання
         if text == "⏭️ Пропустити" and f"rating_lesson_{user_id}" in context.bot_data:
             lesson_data = context.bot_data.get(f"rating_lesson_{user_id}")
             del context.bot_data[f"rating_lesson_{user_id}"]
@@ -594,12 +545,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await start(update, context)
             return
         
-        # Крок 2: Обробка запиту на коментар
         if state == "rating_feedback":
             feedback_data = context.bot_data.get(f"rating_feedback_{user_id}")
             
             if text == "✍️ Написати коментар":
-                # Просимо ввести коментар
                 context.user_data["state"] = "rating_feedback_input"
                 
                 keyboard = [[KeyboardButton("⏭️ Пропустити")]]
@@ -611,7 +560,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             elif text == "⏭️ Пропустити":
-                # Пропускаємо коментар
                 if feedback_data:
                     del context.bot_data[f"rating_feedback_{user_id}"]
                     context.user_data.clear()
@@ -627,12 +575,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await start(update, context)
                     return
         
-        # Крок 3: Збереження коментаря
         if state == "rating_feedback_input":
             feedback_data = context.bot_data.get(f"rating_feedback_{user_id}")
             
             if text == "⏭️ Пропустити":
-                # Пропускаємо коментар
                 if feedback_data:
                     del context.bot_data[f"rating_feedback_{user_id}"]
                     context.user_data.clear()
@@ -648,7 +594,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await start(update, context)
                     return
             else:
-                # Зберігаємо коментар
                 feedback_text = text
                 
                 with get_db() as conn:
@@ -684,7 +629,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["student_name"] = text
             context.user_data["state"] = "registration_phone"
             
-            # Запит на номер телефону
             keyboard = [[KeyboardButton("📱 Надати номер", request_contact=True)]]
             keyboard.append([KeyboardButton("🔙 Скасувати")])
             
@@ -700,7 +644,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Реєстрацію скасовано.")
                 return
             
-            # Обробка контакту або текстового номера
             phone = None
             if update.message.contact:
                 phone = update.message.contact.phone_number
@@ -710,13 +653,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⚠️ Невірний формат номера. Спробуйте ще раз:")
                 return
             
-            # Зберігаємо учня
             user_id = update.message.from_user.id
             name = context.user_data["student_name"]
             tariff = context.user_data["registration_tariff"]
             
             if register_student(name, phone, user_id, tariff, f"link_{tariff}"):
-                # Кнопка для переходу до бронювання
                 keyboard = [
                     [KeyboardButton("🚀 Записатися на заняття")],
                     [KeyboardButton("📋 Мої записи")]
@@ -751,11 +692,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         if state == "admin_panel":
-            # Якщо натиснув "Управління записами" - показуємо меню
             if update.message.text == "✏️ Управління записами":
                 await handle_admin_manage_bookings(update, context)
                 return
-            # Якщо натиснув "Додати учня" - запускаємо flow
             if update.message.text == "➕ Додати учня":
                 await admin_add_student_start(update, context)
                 return
@@ -859,9 +798,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # === МЕНЮ ІНСТРУКТОРА ===
-        # Перевірка кнопки Назад для інструктора
         if text == "🔙 Назад":
-            # Якщо інструктор - повертаємо в головне меню
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (user_id,))
@@ -878,7 +815,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await manage_schedule(update, context)
             return
         elif text == "📊 Моя статистика":
-            # Перевіряємо чи це інструктор
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT id FROM instructors WHERE telegram_id = ?", (user_id,))
@@ -923,7 +859,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # === МЕНЮ СТУДЕНТА ===
         if text == "🚀 Записатися на заняття":
-            # Показати вибір типу коробки
             keyboard = [
                 [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")]
             ]
@@ -958,7 +893,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await save_lesson(update, context)
                 return
             elif text in ["💬 Додати коментар", "✏️ Змінити коментар"]:
-                # Переходимо в режим введення коментаря
                 context.user_data["state"] = "waiting_for_booking_comment"
                 
                 keyboard = [
@@ -984,17 +918,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # === ВВЕДЕННЯ КОМЕНТАРЯ ===
         if state == "waiting_for_booking_comment":
             if text == "🔙 Назад":
-                # Повертаємось до підтвердження
                 context.user_data["state"] = "waiting_for_confirmation"
                 await show_booking_confirmation(update, context)
                 return
             elif text == "⏭️ Пропустити":
-                # Видаляємо коментар якщо був
                 context.user_data["booking_comment"] = ""
                 await show_booking_confirmation(update, context)
                 return
             else:
-                # Зберігаємо коментар
                 context.user_data["booking_comment"] = text
                 
                 await update.message.reply_text(
@@ -1002,7 +933,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"💬 \"{text}\""
                 )
                 
-                # Повертаємось до підтвердження
                 await show_booking_confirmation(update, context)
                 return
         
@@ -1012,21 +942,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             today = now.date()
             
             if text == "📅 На сьогодні":
-                # Сьогодні
                 await show_instructor_schedule_period(update, context, date_from=today, date_to=today)
                 return
             elif text == "📅 На завтра":
-                # Завтра
                 tomorrow = today + timedelta(days=1)
                 await show_instructor_schedule_period(update, context, date_from=tomorrow, date_to=tomorrow)
                 return
             elif text == "📅 На тиждень":
-                # Наступні 7 днів
                 week_end = today + timedelta(days=6)
                 await show_instructor_schedule_period(update, context, date_from=today, date_to=week_end)
                 return
             elif text == "📅 Свій період":
-                # Запитуємо період
                 context.user_data["state"] = "instructor_schedule_custom_period"
                 keyboard = [[KeyboardButton("🔙 Назад")]]
                 await update.message.reply_text(
@@ -1047,7 +973,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await show_instructor_schedule(update, context)
                 return
             
-            # Парсимо дати
             try:
                 parts = text.split('-')
                 if len(parts) != 2:
@@ -1077,7 +1002,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # === ВИБІР КОРОБКИ ===
         if state == "waiting_for_transmission":
-            # Якщо натиснули "Обрати іншого інструктора" - показуємо список
             if text == "👨‍🏫 Обрати іншого інструктора":
                 transmission = context.user_data.get("transmission")
                 if transmission:
@@ -1146,13 +1070,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["instructor"] = instructor_name
             context.user_data["state"] = "waiting_for_date"
             
-            logger.info(f"✅ Інструктор обраний: {instructor_name}")
-            logger.info(f"🔄 Стан змінено на: waiting_for_date")
-            
-            # Генеруємо дати на 14 днів вперед з кількістю вільних годин
             dates = get_next_dates(14, instructor_name)
             
-            # Перевірка: якщо немає жодної вільної дати
             if not dates:
                 keyboard = [
                     [KeyboardButton("👨‍🏫 Обрати іншого інструктора")],
@@ -1169,7 +1088,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["state"] = "waiting_for_transmission"
                 return
             
-            # Робимо кнопки по 2 в рядку
             keyboard = []
             for i in range(0, len(dates), 2):
                 row = [KeyboardButton(dates[i])]
@@ -1190,7 +1108,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"🔵 Обробка дати: {text}")
             
             if text == "🔙 Назад":
-                # Повертаємось до вибору інструктора
                 transmission = context.user_data.get("transmission")
                 instructors = get_instructors_by_transmission(transmission)
                 
@@ -1213,7 +1130,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # ПЕРЕВІРКА: чи це кнопка з датою, а не вручну введена дата
             valid_date_markers = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд", "🟦", "🟥"]
             if not any(marker in text for marker in valid_date_markers):
                 logger.warning(f"⚠️ Спроба ввести дату вручну: {text}")
@@ -1223,22 +1139,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Витягуємо дату з формату "Пн 13.12 (3)", "🟦 Сб 13.12 (3)" або "Пн 13.12.2024"
             date_parts = text.split()
             
-            # Перевіряємо чи є емодзі на початку (🟦 або 🟥)
             if len(date_parts) >= 3 and date_parts[0] in ["🟦", "🟥"]:
-                # Формат: "🟦 Сб 10.01 (5)" → беремо date_parts[2]
-                date_candidate = date_parts[2].replace("(", "").replace(")", "")  # "10.01"
+                date_candidate = date_parts[2].replace("(", "").replace(")", "")
             elif len(date_parts) >= 2:
-                # Формат: "Пн 13.12 (3)" або "Пн 13.12.2024" → беремо date_parts[1]
-                date_candidate = date_parts[1]  # "13.12" або "13.12.2024"
+                date_candidate = date_parts[1]
             else:
-                date_str = text  # Якщо ввели вручну "13.12.2024"
+                date_str = text
                 date_candidate = None
             
             if date_candidate:
-                # Якщо короткий формат "13.12" - додаємо рік
                 if date_candidate.count('.') == 1:
                     current_year = datetime.now().year
                     date_str = f"{date_candidate}.{current_year}"
@@ -1255,7 +1166,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             
             date_obj = datetime.strptime(date_str, "%d.%m.%Y")
-            today = datetime.now(TZ).date()  # З ТАЙМЗОНОЮ!
+            today = datetime.now(TZ).date()
             if date_obj.date() < today:
                 logger.warning(f"⚠️ Минула дата: {date_str} (сьогодні: {today})")
                 await update.message.reply_text("⚠️ Неможливо записатися на минулу дату.")
@@ -1263,14 +1174,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             context.user_data["date"] = date_str
             instructor = context.user_data["instructor"]
-            logger.info(f"✅ Дата валідна: {date_str}, інструктор: {instructor}")
             
-            logger.info(f"🔍 Шукаю вільні слоти...")
             free_slots = get_available_time_slots(instructor, date_str)
-            logger.info(f"📊 Знайдено {len(free_slots)} вільних слотів: {free_slots}")
             
             if not free_slots:
-                logger.warning(f"⚠️ Немає вільних місць на {date_str}")
                 await update.message.reply_text(
                     "😔 На цю дату немає вільних місць.\n"
                     "Оберіть іншу дату:"
@@ -1279,7 +1186,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             context.user_data["state"] = "waiting_for_time"
             
-            # Робимо кнопки часу по 3 в рядку
             keyboard = []
             for i in range(0, len(free_slots), 3):
                 row = []
@@ -1290,7 +1196,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             keyboard.append([KeyboardButton("🔙 Назад")])
             
-            logger.info(f"💬 Відправляю список часів")
             await update.message.reply_text(
                 "🕐 Оберіть час заняття:",
                 reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -1304,22 +1209,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("📅 Введіть іншу дату (ДД.ММ.РРРР):")
                 return
             
-            # ПЕРЕВІРКА: чи це час з кнопок (формат HH:MM)
             if not re.match(r'^([0-1][0-9]|2[0-3]):[0-5][0-9]$', text):
-                logger.warning(f"⚠️ Невірний формат часу: {text}")
                 await update.message.reply_text(
                     "⚠️ Будь ласка, оберіть час з кнопок нижче.\n\n"
                     "Якщо потрібного часу немає - оберіть іншу дату або інструктора."
                 )
                 return
             
-            # ПЕРЕВІРКА: чи час є серед вільних слотів
             instructor = context.user_data.get("instructor")
             date = context.user_data.get("date")
             free_slots = get_available_time_slots(instructor, date)
             
             if text not in free_slots:
-                logger.warning(f"⚠️ Час {text} не входить у вільні слоти: {free_slots}")
                 await update.message.reply_text(
                     "⚠️ Цей час недоступний. Будь ласка, оберіть час з доступних варіантів."
                 )
@@ -1349,7 +1250,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 context.user_data["state"] = "waiting_for_time"
                 
-                # Робимо кнопки часу по 3 в рядку
                 keyboard = []
                 for i in range(0, len(free_slots), 3):
                     row = []
@@ -1370,13 +1270,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("⚠️ Оберіть тривалість із меню.")
                 return
             
-            # Перевірка чи вільні наступні години (для 2 годин)
             if text == "2 години":
                 selected_time = context.user_data["time"]
                 instructor = context.user_data["instructor"]
                 date = context.user_data["date"]
                 
-                # Перевіряємо чи вільна наступна година
                 selected_hour = int(selected_time.split(':')[0])
                 next_hour = f"{selected_hour + 1:02d}:00"
                 
@@ -1390,32 +1288,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             context.user_data["duration"] = text
             
-            # Перевірка чи учень зареєстрований
             user = update.message.from_user
             student = get_student_by_telegram_id(user.id)
             
             if student:
-                # Перевіряємо ліміт 6 годин на тиждень
                 student_id = student[0]
                 selected_date = context.user_data["date"]
                 selected_duration = text
                 
-                # Конвертуємо тривалість в години
                 duration_hours = 2 if "2" in selected_duration else 1
                 
-                # Отримуємо дату уроку
                 lesson_date = datetime.strptime(selected_date, "%d.%m.%Y")
                 
-                # Початок тижня (понеділок)
                 week_start = lesson_date - timedelta(days=lesson_date.weekday())
-                # Кінець тижня (неділя)
                 week_end = week_start + timedelta(days=6)
                 
-                # Рахуємо години на цей тиждень
                 with get_db() as conn:
                     cursor = conn.cursor()
                     
-                    # Фільтруємо по тижню в Python
                     cursor.execute("""
                         SELECT date, duration
                         FROM lessons
@@ -1423,7 +1313,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     """, (user.id,))
                     all_lessons = cursor.fetchall()
                     
-                    hours_this_week = 0  # Ініціалізуємо
+                    hours_this_week = 0
                     for lesson_date_str, lesson_duration in all_lessons:
                         try:
                             ld = datetime.strptime(lesson_date_str, "%d.%m.%Y")
@@ -1437,7 +1327,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         except:
                             pass
                 
-                # Перевіряємо чи не перевищить ліміт
                 if hours_this_week + duration_hours > 6:
                     remaining = 6 - hours_this_week
                     await update.message.reply_text(
@@ -1449,14 +1338,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     return
                 
-                # Учень зареєстрований - показуємо підтвердження
                 context.user_data["student_name"] = student[1]
                 context.user_data["student_phone"] = student[2]
                 context.user_data["student_tariff"] = student[3]
                 
                 await show_booking_confirmation(update, context)
             else:
-                # Не зареєстрований - не даємо записатися
                 await update.message.reply_text(
                     "⚠️ *Помилка!*\n\n"
                     "Для запису потрібна реєстрація через спеціальне посилання.\n"
@@ -1469,12 +1356,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # === ІМ'Я СТУДЕНТА ===
         if state == "waiting_for_name":
             if text == "🔙 Назад":
-                # Якщо це була реєстрація через /start (не через тривалість)
                 if "duration" not in context.user_data:
                     await start(update, context)
                     return
                 
-                # Якщо це після вибору тривалості
                 context.user_data["state"] = "waiting_for_duration"
                 keyboard = [
                     [KeyboardButton("1 година")],
@@ -1487,14 +1372,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Якщо натиснули автозаповнення
             if text.startswith("✅ "):
                 text = text[2:]
             
             context.user_data["student_name"] = text
             context.user_data["state"] = "waiting_for_phone"
             
-            # Пропонуємо поділитися контактом
             keyboard = [[KeyboardButton("📱 Надати номер", request_contact=True)]]
             keyboard.append([KeyboardButton("🔙 Назад")])
             
@@ -1521,7 +1404,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Обробка контакту або текстового номера
             phone = None
             if update.message.contact:
                 phone = update.message.contact.phone_number
@@ -1533,9 +1415,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             context.user_data["student_phone"] = phone
             
-            # Якщо це реєстрація через /start (не через бронювання)
             if "duration" not in context.user_data:
-                # Переходимо до вибору коробки
                 context.user_data["state"] = "waiting_for_transmission"
                 
                 keyboard = [
@@ -1547,7 +1427,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
                 )
             else:
-                # Якщо це під час бронювання - показуємо підтвердження
                 await show_booking_confirmation(update, context)
             return
         
@@ -1566,20 +1445,16 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
     student_tariff = context.user_data.get("student_tariff", 0)
     booking_comment = context.user_data.get("booking_comment", "")
     
-    # Розрахунок вартості на основі тарифу учня
     if student_tariff > 0:
-        # Якщо є тариф учня - використовуємо його
         if "2" in duration:
             price = student_tariff * 2
         else:
             price = student_tariff
     else:
-        # Якщо немає тарифу - стандартні ціни
         price = PRICES.get(duration, 420)
     
     context.user_data["state"] = "waiting_for_confirmation"
     
-    # Формуємо текст
     text = (
         f"📋 *Підтвердження запису*\n\n"
         f"👨‍🏫 Інструктор: {instructor}\n"
@@ -1589,18 +1464,15 @@ async def show_booking_confirmation(update: Update, context: ContextTypes.DEFAUL
         f"💰 Вартість: {price:.0f} грн\n"
     )
     
-    # Додаємо коментар якщо є
     if booking_comment:
         text += f"\n💬 Коментар:\n\"{booking_comment}\"\n"
     
     text += "\nВсе вірно?"
     
-    # Кнопки
     keyboard = [
         [KeyboardButton("✅ Підтвердити")]
     ]
     
-    # Якщо коментар є - показуємо "Змінити", якщо немає - "Додати"
     if booking_comment:
         keyboard.append([KeyboardButton("✏️ Змінити коментар")])
     else:
@@ -1625,7 +1497,6 @@ async def show_instructor_schedule(update: Update, context: ContextTypes.DEFAULT
             await update.message.reply_text("❌ Ви не зареєстровані як інструктор.")
             return
         
-        # Показуємо меню вибору періоду
         keyboard = [
             [KeyboardButton("📅 На сьогодні"), KeyboardButton("📅 На завтра")],
             [KeyboardButton("📅 На тиждень")],
@@ -1658,12 +1529,10 @@ async def show_instructor_schedule_period(update: Update, context: ContextTypes.
         
         instructor_id, instructor_name = instructor_data
         
-        # Поточна дата та час
         now = datetime.now(TZ)
         
         with get_db() as conn:
             cursor = conn.cursor()
-            # Спочатку отримуємо всі активні заняття
             cursor.execute("""
                 SELECT date, time, duration, student_name, student_phone, status, booking_comment
                 FROM lessons
@@ -1674,18 +1543,14 @@ async def show_instructor_schedule_period(update: Update, context: ContextTypes.
             
             all_lessons = cursor.fetchall()
         
-        # Фільтруємо майбутні заняття і сортуємо в Python
         lessons = []
         for date, time, duration, student_name, student_phone, status, booking_comment in all_lessons:
             try:
-                # Парсимо дату з БД (ДД.ММ.РРРР)
                 lesson_datetime = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
                 lesson_datetime = TZ.localize(lesson_datetime)
                 lesson_date = lesson_datetime.date()
                 
-                # Порівнюємо - тільки майбутні
                 if lesson_datetime >= now:
-                    # ✅ ФІЛЬТРАЦІЯ ПО ПЕРІОДУ (якщо вказаний)
                     if date_from and lesson_date < date_from:
                         continue
                     if date_to and lesson_date > date_to:
@@ -1695,10 +1560,7 @@ async def show_instructor_schedule_period(update: Update, context: ContextTypes.
             except:
                 pass
         
-        # Сортуємо від найближчих до найдальших
         lessons.sort(key=lambda x: x[0])
-        
-        # Обмежуємо 100 записами і прибираємо datetime об'єкт
         lessons = [(d, t, dur, sn, sp, st, bc) for (_, d, t, dur, sn, sp, st, bc) in lessons[:100]]
         
         if not lessons:
@@ -1709,7 +1571,6 @@ async def show_instructor_schedule_period(update: Update, context: ContextTypes.
             )
             return
         
-        # Формуємо заголовок з періодом
         if date_from and date_to:
             if date_from == date_to:
                 period_text = f"на {date_from.strftime('%d.%m.%Y')}"
@@ -1718,13 +1579,11 @@ async def show_instructor_schedule_period(update: Update, context: ContextTypes.
         else:
             period_text = ""
         
-        # ✅ РОЗБИВАЄМО НА ПОВІДОМЛЕННЯ ПО 3000 СИМВОЛІВ
         messages = []
         current_message = f"📅 *Ваш розклад {period_text}:*\n\n"
         current_date = None
         
         for date, time, duration, student_name, student_phone, status, booking_comment in lessons:
-            # Формуємо текст для одного уроку
             lesson_text = ""
             if date != current_date:
                 lesson_text += f"\n📆 *{date}*\n"
@@ -1738,21 +1597,16 @@ async def show_instructor_schedule_period(update: Update, context: ContextTypes.
                 lesson_text += f"💬 \"{booking_comment}\"\n"
             lesson_text += "\n"
             
-            # Перевіряємо чи не перевищимо ліміт (залишаємо запас)
             if len(current_message + lesson_text) > 3000:
-                # Зберігаємо поточне повідомлення і починаємо нове
                 messages.append(current_message)
                 current_message = lesson_text
             else:
                 current_message += lesson_text
         
-        # Додаємо останнє повідомлення
         if current_message:
             messages.append(current_message)
         
-        # Відправляємо всі повідомлення
         for i, msg in enumerate(messages):
-            # Кнопку "Назад" додаємо тільки в ОСТАННЬОМУ повідомленні
             if i == len(messages) - 1:
                 keyboard = [[KeyboardButton("🔙 Назад")]]
                 await update.message.reply_text(
@@ -1761,7 +1615,6 @@ async def show_instructor_schedule_period(update: Update, context: ContextTypes.
                     parse_mode="Markdown"
                 )
             else:
-                # Проміжні повідомлення без кнопок
                 await update.message.reply_text(msg, parse_mode="Markdown")
         
     except Exception as e:
@@ -1790,25 +1643,20 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text
     user_id = update.message.from_user.id
     
-    logger.info(f"📊 handle_stats_period: User {user_id}, Text: '{text}'")
-    
     if text == "🔙 Назад":
         await start(update, context)
         return
     
     instructor_data = get_instructor_by_telegram_id(user_id)
     if not instructor_data:
-        logger.error(f"❌ Instructor not found for user {user_id}")
         await update.message.reply_text("❌ Помилка.")
         return
     
     instructor_id, instructor_name = instructor_data
-    logger.info(f"✅ Instructor found: {instructor_name} (ID: {instructor_id})")
     
     today = datetime.now().date()
     
     if text == "📊 За сьогодні":
-        # ВАЖЛИВО: використовуємо ДД.ММ.РРРР бо в lessons.date зберігається саме так!
         date_from = today.strftime("%d.%m.%Y")
         date_to = today.strftime("%d.%m.%Y")
         period_text = "сьогодні"
@@ -1816,12 +1664,10 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
         date_from = (today - timedelta(days=7)).strftime("%d.%m.%Y")
         date_to = today.strftime("%d.%m.%Y")
         period_text = "за тиждень"
-        logger.info(f"📅 Period: {date_from} - {date_to}")
     elif text == "📊 За місяць":
         date_from = (today - timedelta(days=30)).strftime("%d.%m.%Y")
         date_to = today.strftime("%d.%m.%Y")
         period_text = "за місяць"
-        logger.info(f"📅 Period: {date_from} - {date_to}")
     elif text == "📊 Свій період":
         context.user_data["state"] = "stats_custom_period"
         await update.message.reply_text(
@@ -1831,11 +1677,9 @@ async def handle_stats_period(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
     else:
-        logger.warning(f"⚠️ Unknown period button: '{text}'")
         await update.message.reply_text("⚠️ Оберіть період із меню.")
         return
     
-    logger.info(f"🔄 Calling show_instructor_stats...")
     await show_instructor_stats(update, context, instructor_id, date_from, date_to, period_text)
 
 async def handle_stats_custom_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1848,7 +1692,6 @@ async def handle_stats_custom_period(update: Update, context: ContextTypes.DEFAU
         return
     
     try:
-        # Парсимо період: "01.12.2025 - 22.12.2025"
         import re
         match = re.match(r'(\d{2}\.\d{2}\.\d{4})\s*-\s*(\d{2}\.\d{2}\.\d{4})', text)
         
@@ -1863,7 +1706,6 @@ async def handle_stats_custom_period(update: Update, context: ContextTypes.DEFAU
         date_from = match.group(1)
         date_to = match.group(2)
         
-        # Перевіряємо що дати валідні
         from datetime import datetime
         try:
             datetime.strptime(date_from, "%d.%m.%Y")
@@ -1904,7 +1746,6 @@ async def show_instructor_stats(update: Update, context: ContextTypes.DEFAULT_TY
         
         await update.message.reply_text(text)
         
-        # Повертаємось в меню статистики
         await show_instructor_stats_menu(update, context)
         
     except Exception as e:
@@ -1957,7 +1798,7 @@ async def show_cancellation_history(update: Update, context: ContextTypes.DEFAUL
 
 # ======================= RATING FUNCTIONS =======================
 async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Меню оцінювання учнів - ВИПРАВЛЕНА ВЕРСІЯ v17"""
+    """Меню оцінювання учнів"""
     user_id = update.message.from_user.id
     
     try:
@@ -1968,7 +1809,6 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         instructor_id = instructor_data[0]
         
-        # Отримуємо завершені заняття БЕЗ оцінки ІНСТРУКТОРА
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -1987,18 +1827,15 @@ async def rate_student_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📋 Немає занять для оцінювання.")
             return
         
-        # Зберігаємо в context
         context.user_data["lessons_to_rate"] = lessons
         context.user_data["state"] = "rating_select_lesson"
         
         text = "⭐ *Оберіть заняття для оцінювання:*\n\n"
         keyboard = []
         
-        # Показуємо оцінку УЧНЯ якщо є
         for i, (lesson_id, date, time, student_name, rating, feedback) in enumerate(lessons, 1):
             text += f"{i}. {date} {time} - {student_name}\n"
             
-            # Показуємо оцінку учня якщо є
             if rating and rating > 0:
                 stars = "⭐" * rating
                 text += f"   Учень оцінив: {stars} ({rating}/5)\n"
@@ -2121,7 +1958,6 @@ async def handle_edit_schedule(update: Update, context: ContextTypes.DEFAULT_TYP
         
         instructor_id = instructor_data[0]
         
-        # Отримуємо активні заняття
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -2234,25 +2070,18 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
     text = update.message.text
     state = context.user_data.get("state")
     
-    logger.info(f"🔧 handle_schedule_management: text='{text}', state='{state}'")
-    
     if text == "🔙 Назад":
-        logger.info("⬅️ Назад натиснуто")
         if state == "schedule_menu":
             await start(update, context)
         else:
             await manage_schedule(update, context)
         return
     
-    # ВАЖЛИВО: перевірка кнопок меню має бути перед перевіркою стану!
     if text == "🔴 Заблокувати час":
-        logger.info("🔴 Кнопка 'Заблокувати час' натиснута - показую календар")
         context.user_data["state"] = "block_choose_date"
         
-        # Генеруємо дати на 30 днів (місяць)
         dates = get_next_dates(30)
         
-        # Робимо кнопки по 2 в рядку
         keyboard = []
         for i in range(0, len(dates), 2):
             row = [KeyboardButton(dates[i])]
@@ -2269,58 +2098,43 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         return
     
     elif text == "🟢 Розблокувати час":
-        logger.info("🟢 Розблокувати час")
         await show_blocks_to_unblock(update, context)
         return
     
     elif text == "📋 Мої блокування":
-        logger.info("📋 Мої блокування")
         await show_all_blocks(update, context)
         return
     
-    # Тепер обробка станів
-    logger.info(f"📍 Перевірка стану: {state}")
     if state == "block_choose_date":
-        # Витягуємо дату з формату "Пн 13.12.2024", "🟦 Сб 13.12.2024" тощо
         date_parts = text.split()
         
-        # Перевіряємо чи є емодзі на початку (🟦 або 🟥)
         if len(date_parts) >= 3 and date_parts[0] in ["🟦", "🟥"]:
-            # Формат: "🟦 Сб 10.01.2024" → беремо date_parts[2]
             date_str = date_parts[2]
         elif len(date_parts) >= 2:
-            # Формат: "Пн 13.12.2024" → беремо date_parts[1]
-            date_str = date_parts[1]  # "13.12.2024"
+            date_str = date_parts[1]
         else:
-            date_str = text  # Якщо ввели вручну
-        
-        logger.info(f"📆 Обробка дати блокування: {date_str}")
+            date_str = text
         
         if not validate_date_format(date_str):
-            logger.warning(f"⚠️ Невірний формат дати: {date_str}")
             await update.message.reply_text("⚠️ Невірний формат. Оберіть дату з меню.")
             return
         
         context.user_data["block_date"] = date_str
         context.user_data["state"] = "block_choose_time_start"
         
-        # Перевіряємо чи це сьогодні (з правильною таймзоною)
         date_obj = datetime.strptime(date_str, "%d.%m.%Y")
         now = datetime.now(TZ)
         is_today = date_obj.date() == now.date()
         current_hour = now.hour
         
-        # Показуємо години для вибору
         keyboard = []
         for hour in range(WORK_HOURS_START, WORK_HOURS_END):
-            # Якщо сьогодні - пропускаємо минулі години
             if is_today and hour <= current_hour:
                 continue
             keyboard.append([KeyboardButton(f"{hour:02d}:00")])
         
         keyboard.append([KeyboardButton("🔙 Назад")])
         
-        logger.info(f"💬 Відправляю вибір часу початку")
         await update.message.reply_text(
             "🕐 Оберіть час початку блокування:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -2328,8 +2142,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         return
     
     elif state == "block_choose_time_start":
-        logger.info(f"🕐 Обробка часу початку: {text}")
-        
         if not re.match(r'^\d{1,2}:\d{2}$', text):
             await update.message.reply_text("⚠️ Невірний формат. Оберіть час з меню.")
             return
@@ -2337,7 +2149,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         context.user_data["block_time_start"] = text
         context.user_data["state"] = "block_choose_time_end"
         
-        # Показуємо години для кінця (від початку до 18:00)
         start_hour = int(text.split(':')[0])
         keyboard = []
         for hour in range(start_hour + 1, WORK_HOURS_END + 1):
@@ -2345,7 +2156,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         
         keyboard.append([KeyboardButton("🔙 Назад")])
         
-        logger.info(f"💬 Відправляю вибір часу кінця")
         await update.message.reply_text(
             "🕐 Оберіть час кінця блокування:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -2353,8 +2163,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         return
     
     elif state == "block_choose_time_end":
-        logger.info(f"🕐 Обробка часу кінця: {text}")
-        
         if not re.match(r'^\d{1,2}:\d{2}$', text):
             await update.message.reply_text("⚠️ Невірний формат. Оберіть час з меню.")
             return
@@ -2367,7 +2175,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
             [KeyboardButton("🔙 Назад")]
         ]
         
-        logger.info(f"💬 Запитую причину")
         await update.message.reply_text(
             "💬 Введіть причину блокування (або пропустіть):",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -2389,11 +2196,8 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         time_start = context.user_data["block_time_start"]
         time_end = context.user_data["block_time_end"]
         
-        
-        # НЕ конвертуємо дату - в БД вона як ДД.ММ.РРРР
         date_formatted = block_date
         
-        # ПЕРЕВІРКА КОНФЛІКТІВ: чи є уроки в цей час
         def time_to_minutes(time_str):
             h, m = map(int, time_str.split(':'))
             return h * 60 + m
@@ -2411,7 +2215,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
             
             lessons = cursor.fetchall()
         
-        # Перевіряємо конфлікти
         conflicting_lessons = []
         for student_name, student_phone, lesson_time, duration, tariff in lessons:
             if ':' not in lesson_time:
@@ -2419,7 +2222,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
             
             lesson_start_min = time_to_minutes(lesson_time)
             
-            # Визначаємо тривалість уроку
             if "1.5" in duration:
                 lesson_duration = 90
             elif "2" in duration:
@@ -2429,7 +2231,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
             
             lesson_end_min = lesson_start_min + lesson_duration
             
-            # Перевірка на перетин
             if not (block_end_min <= lesson_start_min or block_start_min >= lesson_end_min):
                 conflicting_lessons.append({
                     'name': student_name,
@@ -2439,12 +2240,10 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
                     'tariff': tariff or 0
                 })
         
-        # Якщо є конфлікти - показуємо попередження
         if conflicting_lessons:
             message = f"❌ Не можна заблокувати!\n\n"
             
             for lesson in conflicting_lessons:
-                # Визначаємо час закінчення
                 start_h, start_m = map(int, lesson['time'].split(':'))
                 if "1.5" in lesson['duration']:
                     end_h, end_m = start_h + 1, start_m + 30
@@ -2464,10 +2263,8 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
             await manage_schedule(update, context)
             return
         
-        # Конвертуємо дату для schedule_blocks (там РРРР-ММ-ДД)
         date_for_block = datetime.strptime(block_date, "%d.%m.%Y").strftime("%Y-%m-%d")
 
-        
         from database import add_schedule_block
         
         if add_schedule_block(instructor_id, date_for_block, time_start, time_end, "blocked", reason):
@@ -2494,9 +2291,7 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
         
         instructor_id = instructor_data[0]
         
-        # Поточна дата для фільтрації
         today_date = datetime.now(TZ).date()
-        
         today_str = today_date.strftime('%Y-%m-%d')
         
         with get_db() as conn:
@@ -2541,7 +2336,7 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("❌ Помилка.")
 
 async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показати всі блокування (з розділенням на майбутні та минулі)"""
+    """Показати всі блокування"""
     user_id = update.message.from_user.id
     
     try:
@@ -2568,7 +2363,6 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📋 У вас немає заблокованих годин.")
             return
         
-        # Розділяємо на майбутні та минулі
         future_blocks = []
         past_blocks = []
         
@@ -2581,12 +2375,9 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     past_blocks.append(block)
             except ValueError:
-                logger.warning(f"⚠️ Неправильний формат дати: {date_str}")
                 continue
         
-        # Сортуємо майбутні блокування (від найближчих)
         future_blocks.sort(key=lambda x: datetime.strptime(x[0], '%Y-%m-%d'))
-        # Минулі вже відсортовані DESC
         
         if not future_blocks and not past_blocks:
             await update.message.reply_text("📋 У вас немає заблокованих годин.")
@@ -2594,7 +2385,6 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         text = ""
         
-        # Майбутні блокування
         if future_blocks:
             text += "🟢 *Майбутні блокування:*\n"
             current_date = None
@@ -2607,11 +2397,10 @@ async def show_all_blocks(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text += f" | {reason}"
                 text += "\n"
         
-        # Минулі блокування (останні 30)
         if past_blocks:
             text += "\n🔴 *Минулі блокування:*\n"
             current_date = None
-            for date, time_start, time_end, reason in past_blocks[:30]:  # Обмежуємо 30
+            for date, time_start, time_end, reason in past_blocks[:30]:
                 if date != current_date:
                     text += f"\n📅 {date}\n"
                     current_date = date
@@ -2651,8 +2440,8 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
     text = update.message.text
     
     if text == "🔙 Назад":
-        context.user_data.clear()  # Очищаємо стан
-        await start(update, context)  # Повертаємось в головне меню
+        context.user_data.clear()
+        await start(update, context)
         return
     
     if text == "➕ Додати учня":
@@ -2672,13 +2461,14 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     if text == "👤 Звіт по інструктору":
-        # Показуємо список інструкторів для вибору
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, name FROM instructors ORDER BY name")
             instructors = cursor.fetchall()
         
         keyboard = []
+        # ✅ Кнопка "Всі інструктори" на першому місці
+        keyboard.append([KeyboardButton("👥 Всі інструктори")])
         for inst_id, inst_name in instructors:
             keyboard.append([KeyboardButton(f"👤 {inst_name}")])
         keyboard.append([KeyboardButton("🔙 Назад")])
@@ -2718,11 +2508,8 @@ async def handle_admin_report(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         await update.message.reply_text(text)
         await show_admin_panel(update, context)
-        await update.message.reply_text(text)
-        await show_admin_panel(update, context)
         return
     
-    # Обробка періоду
     today = datetime.now().date()
     
     if text == "📊 За тиждень":
@@ -2763,7 +2550,12 @@ async def handle_instructor_custom_period(update: Update, context: ContextTypes.
         
         instructor_id = context.user_data.get("selected_instructor_id")
         instructor_name = context.user_data.get("selected_instructor_name")
-        await generate_instructor_report(update, context, instructor_id, instructor_name, date_from, date_to, period_text)
+
+        # ✅ Розгалуження: один чи всі
+        if instructor_id == "all":
+            await generate_all_instructors_report(update, context, date_from, date_to, period_text)
+        else:
+            await generate_instructor_report(update, context, instructor_id, instructor_name, date_from, date_to, period_text)
     except Exception as e:
         await update.message.reply_text("❌ Невірний формат. Введіть: ДД.ММ.РРРР - ДД.ММ.РРРР")
 
@@ -2776,6 +2568,24 @@ async def handle_instructor_report_select(update: Update, context: ContextTypes.
         await show_admin_panel(update, context)
         return
     
+    # ✅ Обробка "Всі інструктори"
+    if text == "👥 Всі інструктори":
+        context.user_data["selected_instructor_id"] = "all"
+        context.user_data["selected_instructor_name"] = "Всі інструктори"
+        context.user_data["state"] = "admin_instructor_report_period"
+        
+        keyboard = [
+            [KeyboardButton("📊 За тиждень")],
+            [KeyboardButton("📊 За місяць")],
+            [KeyboardButton("📊 Свій період")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+        await update.message.reply_text(
+            "👥 Всі інструктори\nОберіть період:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        )
+        return
+
     # Витягуємо ім'я з кнопки (прибираємо emoji "👤 ")
     instructor_name = text.replace("👤 ", "").strip()
     instructor_list = context.user_data.get("instructor_list", {})
@@ -2829,8 +2639,121 @@ async def handle_instructor_report_period(update: Update, context: ContextTypes.
     
     instructor_id = context.user_data.get("selected_instructor_id")
     instructor_name = context.user_data.get("selected_instructor_name")
-    await generate_instructor_report(update, context, instructor_id, instructor_name, date_from, date_to, period_text)
 
+    # ✅ Розгалуження: один чи всі
+    if instructor_id == "all":
+        await generate_all_instructors_report(update, context, date_from, date_to, period_text)
+    else:
+        await generate_instructor_report(update, context, instructor_id, instructor_name, date_from, date_to, period_text)
+
+# ======================= НОВИЙ ЗВІТ: ВСІ ІНСТРУКТОРИ =======================
+async def generate_all_instructors_report(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    date_from: str,
+    date_to: str,
+    period_text: str
+):
+    """Детальний звіт по ВСІХ інструкторах за період (з розбивкою по днях)"""
+    try:
+        period_from = datetime.strptime(date_from, "%Y-%m-%d").strftime("%d.%m.%Y")
+        period_to   = datetime.strptime(date_to,   "%Y-%m-%d").strftime("%d.%m.%Y")
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name FROM instructors WHERE is_active = 1 ORDER BY name")
+            instructors = cursor.fetchall()
+
+        if not instructors:
+            await update.message.reply_text("📋 Інструкторів не знайдено.")
+            await show_admin_panel(update, context)
+            return
+
+        # Заголовок
+        header = (
+            f"📊 *Звіт по всіх інструкторах*\n"
+            f"📅 {period_from} – {period_to}\n"
+        )
+        await update.message.reply_text(header, parse_mode="Markdown")
+
+        grand_lessons  = 0
+        grand_hours    = 0.0
+        grand_earnings = 0.0
+
+        for inst_id, inst_name in instructors:
+            data = get_instructor_report(inst_id, date_from, date_to)
+            if not data or data["total_lessons"] == 0:
+                continue  # Пропускаємо інструкторів без занять за період
+
+            grand_lessons  += data["total_lessons"]
+            grand_hours    += data["total_hours"]
+            grand_earnings += data["earnings"]
+
+            # Блок одного інструктора
+            lines = [f"━━━ 👨‍🏫 *{inst_name}* ━━━"]
+
+            if data["details"]:
+                current_date = None
+                for date, time, hours, student_name, status, rating in data["details"]:
+                    if date != current_date:
+                        lines.append(f"\n📆 *{date}*")
+                        current_date = date
+
+                    status_icon = (
+                        "✅" if status == "completed" else
+                        "❌" if status == "cancelled" else
+                        "🔵"
+                    )
+                    line = f"{status_icon} {time} ({hours}г) – {student_name}"
+                    if rating:
+                        line += f" ⭐{rating}"
+                    lines.append(line)
+
+            # Підсумок по інструктору
+            avg = data["avg_rating"]
+            rating_str = f"{avg:.1f}" if avg else "–"
+            lines.append(
+                f"\n📝 {data['total_lessons']} | "
+                f"⏱ {data['total_hours']}г | "
+                f"💰 {data['earnings']:.0f} грн | "
+                f"⭐ {rating_str}"
+            )
+
+            # Розбиваємо на шматки по 3500 символів (ліміт Telegram ~4096)
+            block = "\n".join(lines)
+            chunks = []
+            while len(block) > 3500:
+                split_at = block.rfind("\n", 0, 3500)
+                if split_at == -1:
+                    split_at = 3500
+                chunks.append(block[:split_at])
+                block = block[split_at:]
+            chunks.append(block)
+
+            for chunk in chunks:
+                if chunk.strip():
+                    await update.message.reply_text(chunk.strip(), parse_mode="Markdown")
+
+        # Загальний підсумок
+        if grand_lessons == 0:
+            summary = f"📋 За цей період занять не знайдено."
+        else:
+            summary = (
+                f"──────────────────\n"
+                f"📊 *РАЗОМ {period_text}:*\n"
+                f"📝 {grand_lessons} занять  |  "
+                f"⏱ {grand_hours:.1f} год  |  "
+                f"💰 {grand_earnings:.0f} грн"
+            )
+        await update.message.reply_text(summary, parse_mode="Markdown")
+        await show_admin_panel(update, context)
+
+    except Exception as e:
+        logger.error(f"Error in generate_all_instructors_report: {e}", exc_info=True)
+        await update.message.reply_text("❌ Помилка генерації звіту.")
+        await show_admin_panel(update, context)
+
+# ======================= ОДИНОЧНИЙ ЗВІТ ПО ІНСТРУКТОРУ =======================
 async def generate_instructor_report(update: Update, context: ContextTypes.DEFAULT_TYPE, instructor_id, instructor_name, date_from, date_to, period_text):
     """Генерація детального звіту по одному інструктору"""
     try:
@@ -2935,7 +2858,6 @@ async def admin_add_student_start(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def handle_admin_add_student_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка введеного імені нового учня"""
     text = update.message.text
     
     if text == "🔙 Скасувати":
@@ -2959,7 +2881,6 @@ async def handle_admin_add_student_name(update: Update, context: ContextTypes.DE
     )
 
 async def handle_admin_add_student_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка введеного телефону нового учня"""
     text = update.message.text
     
     if text == "🔙 Скасувати":
@@ -2973,7 +2894,6 @@ async def handle_admin_add_student_phone(update: Update, context: ContextTypes.D
         )
         return
     
-    # Перевіряємо чи не існує вже учень з таким телефоном
     existing = get_student_by_phone(text)
     if existing:
         await update.message.reply_text(
@@ -3002,7 +2922,6 @@ async def handle_admin_add_student_phone(update: Update, context: ContextTypes.D
     )
 
 async def handle_admin_add_student_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка вибору тарифу нового учня"""
     text = update.message.text
     
     if text == "🔙 Скасувати":
@@ -3040,7 +2959,6 @@ async def handle_admin_add_student_tariff(update: Update, context: ContextTypes.
     )
 
 async def handle_admin_add_student_tgid(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка telegram_id нового учня та збереження"""
     text = update.message.text
     
     if text == "🔙 Скасувати":
@@ -3055,7 +2973,6 @@ async def handle_admin_add_student_tgid(update: Update, context: ContextTypes.DE
     telegram_id = None
     
     if text != "⏭️ Пропустити":
-        # Перевіряємо чи це число
         if not text.strip().lstrip("-").isdigit():
             await update.message.reply_text(
                 "⚠️ Telegram ID — це число.\n\n"
@@ -3064,7 +2981,6 @@ async def handle_admin_add_student_tgid(update: Update, context: ContextTypes.DE
             return
         telegram_id = int(text.strip())
         
-        # Перевіряємо чи не зайнятий цей telegram_id
         existing = get_student_by_telegram_id(telegram_id)
         if existing:
             await update.message.reply_text(
@@ -3075,12 +2991,10 @@ async def handle_admin_add_student_tgid(update: Update, context: ContextTypes.DE
             )
             return
     
-    # Зберігаємо в БД
     try:
         success = register_student(name, phone, telegram_id, tariff, "admin")
         
         if success:
-            # Формуємо підсумок
             summary = (
                 f"✅ *Учня успішно додано!*\n\n"
                 f"👤 Ім'я: {name}\n"
@@ -3094,7 +3008,6 @@ async def handle_admin_add_student_tgid(update: Update, context: ContextTypes.DE
             
             await update.message.reply_text(summary, parse_mode="Markdown")
             
-            # Якщо є telegram_id — надсилаємо учню повідомлення
             if telegram_id:
                 try:
                     await update.get_bot().send_message(
@@ -3131,7 +3044,6 @@ async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEF
     """Обробка меню управління записами"""
     text = update.message.text
     
-    # Якщо тільки зайшли в меню - показуємо кнопки
     if text == "✏️ Управління записами":
         keyboard = [
             [KeyboardButton("❌ Скасувати запис учня")],
@@ -3151,7 +3063,7 @@ async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEF
     
     if text == "➕ Записати учня вручну":
         context.user_data["state"] = "admin_manual_enter_phone"
-        context.user_data["admin_booking"] = {}  # Очищаємо дані
+        context.user_data["admin_booking"] = {}
         
         await update.message.reply_text(
             "📱 *Крок 1/7: Телефон учня*\n\n"
@@ -3163,16 +3075,13 @@ async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEF
         return
     
     if text == "❌ Скасувати запис учня":
-        # Генеруємо дати на 30 днів (майбутнє + минуле)
         today = datetime.now(TZ).date()
         dates_with_lessons = []
         
-        # Перевіряємо дати від -7 днів до +30 днів
         for i in range(-7, 31):
             date = today + timedelta(days=i)
             date_str = date.strftime('%d.%m.%Y')
             
-            # Рахуємо кількість активних уроків на цю дату
             with get_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -3191,9 +3100,8 @@ async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEF
             await show_admin_panel(update, context)
             return
         
-        # Показуємо дати
         keyboard = []
-        for date_str, formatted in dates_with_lessons[:20]:  # Максимум 20 дат
+        for date_str, formatted in dates_with_lessons[:20]:
             keyboard.append([KeyboardButton(formatted)])
         keyboard.append([KeyboardButton("🔙 Назад")])
         
@@ -3206,7 +3114,6 @@ async def handle_admin_manage_bookings(update: Update, context: ContextTypes.DEF
         )
 
 async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка вибору дати для скасування - показує інструкторів"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -3222,7 +3129,6 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
         )
         return
     
-    # Витягуємо дату з формату "Пн 18.02 (5 уроків)"
     dates_map = context.user_data.get("dates_map", {})
     date_str = dates_map.get(text)
     
@@ -3230,10 +3136,8 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
         await update.message.reply_text("❌ Невірна дата. Оберіть зі списку.")
         return
     
-    # Зберігаємо обрану дату
     context.user_data["selected_date"] = date_str
     
-    # Отримуємо список інструкторів з уроками на цю дату
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -3250,14 +3154,12 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
         await update.message.reply_text("📋 Немає активних уроків на цю дату.")
         return
     
-    # Формуємо меню з інструкторами
     keyboard = []
     total_lessons = sum(count for _, count in instructors)
     
     for instructor_name, lesson_count in instructors:
         keyboard.append([KeyboardButton(f"👨‍🏫 {instructor_name} ({lesson_count})")])
     
-    # Додаємо опцію "Всі уроки" якщо їх <= 15
     if total_lessons <= 15:
         keyboard.append([KeyboardButton("📋 Всі уроки")])
     
@@ -3271,26 +3173,20 @@ async def handle_admin_cancel_select_date(update: Update, context: ContextTypes.
     )
 
 async def handle_admin_cancel_select_instructor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка вибору інструктора - показує його уроки"""
     text = update.message.text
     date_str = context.user_data.get("selected_date")
     
     if text == "🔙 Назад":
-        # Повертаємось до вибору дати
         context.user_data["state"] = "admin_cancel_select_date"
         await update.message.reply_text("📅 Оберіть іншу дату:")
         return
     
-    # Отримуємо уроки
     if text == "📋 Всі уроки":
-        # Показуємо всі уроки
         instructor_filter = None
     else:
-        # Витягуємо ім'я інструктора з "👨‍🏫 Рекетчук Богдан (12)"
         instructor_name = text.replace("👨‍🏫 ", "").split(" (")[0].strip()
         instructor_filter = instructor_name
     
-    # Отримуємо уроки
     with get_db() as conn:
         cursor = conn.cursor()
         if instructor_filter:
@@ -3315,7 +3211,6 @@ async def handle_admin_cancel_select_instructor(update: Update, context: Context
         await update.message.reply_text("📋 Немає уроків для цього інструктора.")
         return
     
-    # Формуємо список уроків
     message = f"📅 {date_str}"
     if instructor_filter:
         message += f" - {instructor_filter}"
@@ -3325,7 +3220,7 @@ async def handle_admin_cancel_select_instructor(update: Update, context: Context
     
     for idx, (lesson_id, time, duration, student_name, student_phone, instructor_name) in enumerate(lessons, 1):
         message += f"{idx}️⃣ {time} {student_name[:15]}\n"
-        if not instructor_filter:  # Якщо всі інструктори - показуємо ім'я
+        if not instructor_filter:
             message += f"   👨‍🏫 {instructor_name}\n"
         
         keyboard.append([KeyboardButton(f"{idx}️⃣")])
@@ -3341,16 +3236,13 @@ async def handle_admin_cancel_select_instructor(update: Update, context: Context
     )
 
 async def handle_admin_cancel_select_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка скасування конкретного уроку"""
     text = update.message.text
     
     if text == "🔙 Назад":
         context.user_data["state"] = "admin_cancel_select_instructor"
-        # Повертаємось до вибору інструктора
         await update.message.reply_text("👨‍🏫 Оберіть іншого інструктора:")
         return
     
-    # Витягуємо номер (1️⃣ → "1")
     lesson_num = text.replace("️⃣", "")
     lessons_on_date = context.user_data.get("lessons_on_date", {})
     lesson_id = lessons_on_date.get(lesson_num)
@@ -3359,7 +3251,6 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
         await update.message.reply_text("❌ Невірний номер. Оберіть зі списку.")
         return
     
-    # Отримуємо деталі уроку
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -3376,7 +3267,6 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
     
     student_name, student_phone, date, time, duration, instructor_name, student_telegram_id = lesson
     
-    # Скасовуємо урок
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -3389,7 +3279,6 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
             """, (lesson_id,))
             conn.commit()
         
-        # Відправляємо повідомлення учню
         if student_telegram_id:
             try:
                 await context.bot.send_message(
@@ -3418,7 +3307,6 @@ async def handle_admin_cancel_select_lesson(update: Update, context: ContextType
 
 # ======================= ADMIN MANUAL BOOKING =======================
 async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 1: Введення телефону"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -3434,14 +3322,12 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
         )
         return
     
-    # Нормалізуємо телефон
     phone = text.strip()
     if phone.startswith("0"):
         phone = "+38" + phone
     elif not phone.startswith("+"):
         phone = "+" + phone
     
-    # Перевірка формату
     if not re.match(r'^\+380\d{9}$', phone):
         await update.message.reply_text(
             "❌ Невірний формат!\n\n"
@@ -3450,14 +3336,11 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
         )
         return
     
-    # Зберігаємо телефон
     context.user_data["admin_booking"]["phone"] = phone
     
-    # Шукаємо учня в БД
     student = get_student_by_phone(phone)
     
     if student:
-        # Учень знайдений
         student_id, name, student_phone, tariff, registered_via, student_tg_id = student
         context.user_data["admin_booking"]["name"] = name
         context.user_data["admin_booking"]["tariff"] = tariff
@@ -3481,7 +3364,6 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
         )
         context.user_data["state"] = "admin_manual_confirm_student"
     else:
-        # Учень не знайдений - просимо ввести ім'я
         context.user_data["admin_booking"]["existing_student"] = False
         context.user_data["state"] = "admin_manual_enter_name"
         
@@ -3495,7 +3377,6 @@ async def handle_admin_manual_enter_phone(update: Update, context: ContextTypes.
         )
 
 async def handle_admin_manual_confirm_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Підтвердження знайденого учня"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -3507,7 +3388,6 @@ async def handle_admin_manual_confirm_student(update: Update, context: ContextTy
         return
     
     if text == "✅ Так, це той учень":
-        # Запитуємо тип коробки (в таблиці students її немає)
         keyboard = [
             [KeyboardButton("🚗 Автомат"), KeyboardButton("🚙 Механіка")],
             [KeyboardButton("🔙 Назад")]
@@ -3528,7 +3408,6 @@ async def handle_admin_manual_confirm_student(update: Update, context: ContextTy
         )
 
 async def handle_admin_manual_enter_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 2: Введення імені"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -3555,7 +3434,6 @@ async def handle_admin_manual_enter_name(update: Update, context: ContextTypes.D
     )
 
 async def handle_admin_manual_select_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 3: Вибір тарифу"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -3566,7 +3444,6 @@ async def handle_admin_manual_select_tariff(update: Update, context: ContextType
         )
         return
     
-    # Витягуємо тариф з тексту
     tariff = int(text.split()[1])
     context.user_data["admin_booking"]["tariff"] = tariff
     context.user_data["state"] = "admin_manual_select_transmission"
@@ -3584,13 +3461,11 @@ async def handle_admin_manual_select_tariff(update: Update, context: ContextType
     )
 
 async def handle_admin_manual_select_transmission(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 4: Вибір коробки"""
     text = update.message.text
     
     if text == "🔙 Назад":
         context.user_data["state"] = "admin_manual_select_tariff"
         keyboard = [
-            [KeyboardButton("💰 490 грн/год")],
             [KeyboardButton("💰 490 грн/год")],
             [KeyboardButton("💰 550 грн/год")],
             [KeyboardButton("🔙 Назад")]
@@ -3631,12 +3506,10 @@ async def handle_admin_manual_select_transmission(update: Update, context: Conte
     )
 
 async def handle_admin_manual_select_instructor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 5: Вибір інструктора"""
     text = update.message.text
     
     if text == "🔙 Назад":
         if context.user_data["admin_booking"].get("existing_student"):
-            # Повертаємось до підтвердження
             context.user_data["state"] = "admin_manual_confirm_student"
             await update.message.reply_text("Підтвердіть дані учня:")
         else:
@@ -3652,11 +3525,9 @@ async def handle_admin_manual_select_instructor(update: Update, context: Context
             )
         return
     
-    # Витягуємо ім'я інструктора
     instructor_name = text.split(" ⭐")[0].split(" 🆕")[0]
     context.user_data["admin_booking"]["instructor"] = instructor_name
     
-    # Генеруємо дати (30 днів для адміна)
     dates = get_next_dates(30, instructor_name)
     
     if not dates:
@@ -3679,7 +3550,6 @@ async def handle_admin_manual_select_instructor(update: Update, context: Context
     )
 
 async def handle_admin_manual_select_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 6: Вибір дати"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -3687,10 +3557,9 @@ async def handle_admin_manual_select_date(update: Update, context: ContextTypes.
         await update.message.reply_text("👨‍🏫 Оберіть іншого інструктора:")
         return
     
-    # Парсимо дату
     try:
         parts = text.split()
-        date_part = parts[1]  # "25.02"
+        date_part = parts[1]
         day, month = date_part.split('.')
         year = datetime.now().year
         if int(month) < datetime.now().month:
@@ -3699,7 +3568,6 @@ async def handle_admin_manual_select_date(update: Update, context: ContextTypes.
         
         context.user_data["admin_booking"]["date"] = date_str
         
-        # Отримуємо вільні слоти
         instructor = context.user_data["admin_booking"]["instructor"]
         free_slots = get_available_time_slots(instructor, date_str)
         
@@ -3707,7 +3575,6 @@ async def handle_admin_manual_select_date(update: Update, context: ContextTypes.
             await update.message.reply_text("❌ Немає вільних часів. Оберіть іншу дату.")
             return
         
-        # Показуємо слоти по 3 в рядку
         keyboard = []
         for i in range(0, len(free_slots), 3):
             row = []
@@ -3728,7 +3595,6 @@ async def handle_admin_manual_select_date(update: Update, context: ContextTypes.
         await update.message.reply_text("❌ Помилка парсингу дати. Оберіть зі списку.")
 
 async def handle_admin_manual_select_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 7: Вибір часу"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -3736,7 +3602,6 @@ async def handle_admin_manual_select_time(update: Update, context: ContextTypes.
         await update.message.reply_text("📅 Оберіть іншу дату:")
         return
     
-    # Перевірка формату часу
     if not re.match(r'^([0-1][0-9]|2[0-3]):[0-5][0-9]$', text):
         await update.message.reply_text("⚠️ Оберіть час з кнопок нижче.")
         return
@@ -3758,7 +3623,6 @@ async def handle_admin_manual_select_time(update: Update, context: ContextTypes.
     )
 
 async def handle_admin_manual_select_duration(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Крок 8: Вибір тривалості"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -3772,11 +3636,9 @@ async def handle_admin_manual_select_duration(update: Update, context: ContextTy
     
     context.user_data["admin_booking"]["duration"] = text
     
-    # Показуємо підтвердження
     booking = context.user_data["admin_booking"]
     tariff = booking["tariff"]
     
-    # Рахуємо вартість
     if "2" in text:
         price = tariff * 2
     elif "1.5" in text:
@@ -3805,7 +3667,6 @@ async def handle_admin_manual_select_duration(update: Update, context: ContextTy
     )
 
 async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Підтвердження та створення запису"""
     text = update.message.text
     
     if text == "🔙 Скасувати":
@@ -3817,17 +3678,14 @@ async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFA
     
     booking = context.user_data["admin_booking"]
     
-    # Отримуємо instructor_id
     instructor_data = get_instructor_by_name(booking["instructor"])
     if not instructor_data:
         await update.message.reply_text("❌ Помилка: інструктор не знайдений.")
         return
     
     instructor_id = instructor_data[0]
-    
     student_telegram_id = booking.get("student_telegram_id")
     
-    # Створюємо урок
     try:
         with get_db() as conn:
             cursor = conn.cursor()
@@ -3847,7 +3705,6 @@ async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFA
             ))
             conn.commit()
         
-        # Надсилаємо сповіщення учню якщо є telegram_id
         if student_telegram_id:
             try:
                 await context.bot.send_message(
@@ -3886,7 +3743,6 @@ async def handle_admin_manual_confirm(update: Update, context: ContextTypes.DEFA
 
 # ======================= STUDENT FUNCTIONS =======================
 async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показати записи студента"""
     user_id = update.message.from_user.id
     
     try:
@@ -3923,7 +3779,6 @@ async def show_student_lessons(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ Помилка завантаження записів.")
 
 async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показати статистику учня"""
     user_id = update.message.from_user.id
     
     try:
@@ -3935,7 +3790,6 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # ========== ЗАПЛАНОВАНО ==========
             cursor.execute("""
                 SELECT COUNT(*), 
                        SUM(CASE 
@@ -3958,7 +3812,6 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             planned_hours = planned[1] or 0
             planned_cost = planned[2] or 0
             
-            # ========== ЗАВЕРШЕНО ==========
             cursor.execute("""
                 SELECT COUNT(*), 
                        SUM(CASE 
@@ -3980,7 +3833,6 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             completed_hours = completed[1] or 0
             completed_cost = completed[2] or 0
             
-            # ========== ПРОГРЕС (НА ОСНОВІ ОЦІНОК) ==========
             cursor.execute("""
                 SELECT AVG(rating), COUNT(rating)
                 FROM lessons
@@ -3993,7 +3845,6 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             avg_rating = rating_data[0] or 0
             rated_lessons = rating_data[1] or 0
             
-            # ========== ІНСТРУКТОРИ ==========
             cursor.execute("""
                 SELECT i.name, COUNT(*)
                 FROM lessons l
@@ -4006,10 +3857,8 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
             
             instructors = cursor.fetchall()
         
-        # ========== ФОРМУВАННЯ ПОВІДОМЛЕННЯ ==========
         text = "📊 Статистика\n\n"
         
-        # Заплановано
         text += "▶️ ЗАПЛАНОВАНО\n"
         if planned_count > 0:
             text += f"   {planned_count} {'урок' if planned_count == 1 else 'уроки' if planned_count < 5 else 'уроків'} "
@@ -4017,7 +3866,6 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
         else:
             text += "   Немає запланованих уроків\n\n"
         
-        # Завершено
         text += "✅ ЗАВЕРШЕНО\n"
         if completed_count > 0:
             text += f"   {completed_count} {'урок' if completed_count == 1 else 'уроки' if completed_count < 5 else 'уроків'} "
@@ -4025,17 +3873,15 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
         else:
             text += "   Поки немає завершених уроків\n\n"
         
-        # Прогрес (на основі оцінок)
         if rated_lessons > 0:
             text += "📈 ПРОГРЕС\n"
             text += f"   ⭐ Середня оцінка: {avg_rating:.1f}/5 (за {rated_lessons} {'урок' if rated_lessons == 1 else 'уроки' if rated_lessons < 5 else 'уроків'})\n\n"
         
-        # Інструктори
         if instructors:
             text += "👨‍🏫 ІНСТРУКТОРИ\n"
             instructor_names = []
             for name, count in instructors:
-                short_name = name.split()[0]  # Тільки ім'я
+                short_name = name.split()[0]
                 instructor_names.append(f"{short_name}: {count}")
             text += f"   {' | '.join(instructor_names)}\n"
         
@@ -4047,7 +3893,6 @@ async def show_student_statistics(update: Update, context: ContextTypes.DEFAULT_
 
 # ======================= CANCEL LESSON FUNCTIONS =======================
 async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показати уроки які можна скасувати"""
     user_id = update.message.from_user.id
     
     try:
@@ -4070,16 +3915,13 @@ async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_T
             await update.message.reply_text("📋 У вас немає активних записів на заняття.")
             return
         
-        # Фільтруємо уроки - залишаємо тільки ті що >12 годин
         cancelable_lessons = []
         
         for lesson_id, date, time, duration, instructor_name in lessons:
             try:
-                # Парсимо дату і час уроку
                 lesson_datetime = datetime.strptime(f"{date} {time}", "%d.%m.%Y %H:%M")
                 lesson_datetime = TZ.localize(lesson_datetime)
                 
-                # Скільки годин до уроку
                 hours_until = (lesson_datetime - now).total_seconds() / 3600
                 
                 if hours_until >= 12:
@@ -4095,7 +3937,6 @@ async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_T
             )
             return
         
-        # Зберігаємо в context
         context.user_data["cancelable_lessons"] = cancelable_lessons
         context.user_data["state"] = "cancel_lesson_select"
         
@@ -4123,7 +3964,6 @@ async def show_lessons_to_cancel(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("❌ Помилка завантаження записів.")
 
 async def handle_cancel_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка вибору уроку для скасування"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -4142,7 +3982,6 @@ async def handle_cancel_lesson(update: Update, context: ContextTypes.DEFAULT_TYP
         selected = lessons[lesson_index]
         lesson_id, date, time, duration, instructor_name, hours_until = selected
         
-        # Зберігаємо вибраний урок
         context.user_data["cancel_lesson_id"] = lesson_id
         context.user_data["cancel_lesson_date"] = date
         context.user_data["cancel_lesson_time"] = time
@@ -4173,7 +4012,6 @@ async def handle_cancel_lesson(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ Помилка.")
 
 async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка підтвердження скасування"""
     text = update.message.text
     
     if text == "🔙 Ні, залишити":
@@ -4194,11 +4032,9 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
         
         user_id = update.message.from_user.id
         
-        # Отримуємо дані учня та інструктора
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Дані уроку
             cursor.execute("""
                 SELECT student_name, student_phone, student_tariff, duration, instructor_id
                 FROM lessons
@@ -4213,7 +4049,6 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
             
             student_name, student_phone, student_tariff, duration, instructor_id = lesson_data
             
-            # Оновлюємо статус уроку
             cursor.execute("""
                 UPDATE lessons
                 SET status = 'cancelled',
@@ -4222,13 +4057,11 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
                 WHERE id = ?
             """, (lesson_id,))
             
-            # Отримуємо telegram_id інструктора
             cursor.execute("SELECT telegram_id FROM instructors WHERE id = ?", (instructor_id,))
             instructor_telegram_id = cursor.fetchone()[0]
             
             conn.commit()
         
-        # Повідомлення учню
         await update.message.reply_text(
             f"✅ *Урок скасовано!*\n\n"
             f"📅 {date} {time}\n"
@@ -4236,10 +4069,8 @@ async def handle_cancel_confirmation(update: Update, context: ContextTypes.DEFAU
             parse_mode="Markdown"
         )
         
-        # Повідомлення інструктору
         if instructor_telegram_id:
             try:
-                # Розрахунок вартості
                 if student_tariff and "2" in duration:
                     price = student_tariff * 2
                 elif student_tariff:
@@ -4288,9 +4119,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         instructor_id, instructor_telegram_id = instructor_data
         
-        # ========== ПЕРЕВІРКИ ПЕРЕД ЗАПИСОМ ==========
-        
-        # Розрахунок часу закінчення уроку
         start_hour = int(time.split(':')[0])
         if "2" in duration:
             lesson_hours = 2
@@ -4302,12 +4130,9 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         end_hour = start_hour + lesson_hours
         
         with get_db() as conn:
-            # 🔒 ТРАНЗАКЦІЙНА БЛОКУВАННЯ: Запобігає race condition
-            # Блокує БД від одночасних записів поки не закінчаться всі перевірки
             conn.execute("BEGIN IMMEDIATE")
             cursor = conn.cursor()
             
-            # ПЕРЕВІРКА 1: Чи учень вже має урок в цей час (у будь-якого інструктора)
             cursor.execute("""
                 SELECT i.name, l.time, l.duration
                 FROM lessons l
@@ -4327,7 +4152,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     existing_hours = 1
                 existing_end = existing_start + existing_hours
                 
-                # Перевірка перетину часу
                 if not (end_hour <= existing_start or start_hour >= existing_end):
                     await update.message.reply_text(
                         f"❌ *Не можна записатись!*\n\n"
@@ -4340,7 +4164,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     return
             
-            # ПЕРЕВІРКА 2: Чи не перевищує ліміт 2 години в день
             cursor.execute("""
                 SELECT SUM(
                     CASE 
@@ -4365,23 +4188,10 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # ПЕРЕВІРКА 3: Чи не перевищує ліміт 6 годин в тиждень
-            # Визначаємо початок і кінець тижня
             from datetime import datetime, timedelta
             date_obj = datetime.strptime(date, "%d.%m.%Y")
-            # Понеділок поточного тижня
             week_start = date_obj - timedelta(days=date_obj.weekday())
-            # Неділя поточного тижня
             week_end = week_start + timedelta(days=6)
-            
-            week_start_str = week_start.strftime("%d.%m.%Y")
-            week_end_str = week_end.strftime("%d.%m.%Y")
-            
-            logger.info(f"🔍 ПЕРЕВІРКА ТИЖНЕВОГО ЛІМІТУ:")
-            logger.info(f"   Учень: telegram_id={student_telegram_id}")
-            logger.info(f"   Дата запису: {date}")
-            logger.info(f"   Тиждень: {week_start_str} - {week_end_str}")
-            logger.info(f"   Тривалість нового запису: {lesson_hours} год")
             
             cursor.execute("""
                 SELECT SUM(
@@ -4402,28 +4212,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             total_hours_week = cursor.fetchone()[0] or 0
             
-            logger.info(f"   Вже записано на цей тиждень: {total_hours_week} год")
-            logger.info(f"   Разом буде: {total_hours_week + lesson_hours} год")
-            logger.info(f"   Ліміт: 6 год")
-            
-            # Показуємо які саме записи враховані
-            cursor.execute("""
-                SELECT date, time, duration, status
-                FROM lessons
-                WHERE student_telegram_id = ? 
-                AND substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2) 
-                    BETWEEN ? AND ?
-                AND status = 'active'
-                ORDER BY substr(date, 7, 4) || '-' || substr(date, 4, 2) || '-' || substr(date, 1, 2), time
-            """, (student_telegram_id, 
-                  week_start.strftime("%Y-%m-%d"), 
-                  week_end.strftime("%Y-%m-%d")))
-            
-            week_lessons = cursor.fetchall()
-            logger.info(f"   📝 Деталі записів на тиждень ({len(week_lessons)} шт):")
-            for wl_date, wl_time, wl_dur, wl_status in week_lessons:
-                logger.info(f"      - {wl_date} {wl_time}, {wl_dur}, status={wl_status}")
-            
             if total_hours_week + lesson_hours > 6:
                 await update.message.reply_text(
                     f"❌ *Ліміт перевищено!*\n\n"
@@ -4434,8 +4222,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # ✅ ПЕРЕВІРКА 4: Чи інструктор вільний на цей час (КРИТИЧНО!)
-            logger.info(f"🔍 Перевірка зайнятості: інструктор_id={instructor_id}, дата={date}, час={time}")
             cursor.execute("""
                 SELECT student_name, student_telegram_id, time, duration
                 FROM lessons
@@ -4443,12 +4229,9 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """, (instructor_id, date))
             
             instructor_lessons = cursor.fetchall()
-            logger.info(f"📊 Знайдено {len(instructor_lessons)} активних уроків у інструктора на {date}")
             
             for other_student_name, other_student_id, other_time, other_duration in instructor_lessons:
-                # Якщо це той самий учень - пропускаємо (дозволяємо оновити запис)
                 if other_student_id == student_telegram_id:
-                    logger.info(f"⏭️ Пропускаю: той самий учень (id={other_student_id})")
                     continue
                 
                 other_start = int(other_time.split(':')[0])
@@ -4460,9 +4243,7 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     other_hours = 1
                 other_end = other_start + other_hours
                 
-                # Перевірка перетину часу
                 if not (end_hour <= other_start or start_hour >= other_end):
-                    logger.warning(f"❌ КОНФЛІКТ! Інструктор зайнятий: {other_student_name} має урок о {other_time}")
                     await update.message.reply_text(
                         f"❌ *Інструктор зайнятий!*\n\n"
                         f"На цей час вже записаний інший учень:\n"
@@ -4474,10 +4255,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     return
             
-            logger.info(f"✅ Всі перевірки пройдені! Зберігаю урок: {student_name} → {instructor_name}, {date} {time}")
-            
-            # ========== ВСІ ПЕРЕВІРКИ ПРОЙШЛИ - ЗБЕРІГАЄМО ==========
-            
             booking_comment = context.user_data.get("booking_comment", "")
             
             cursor.execute("""
@@ -4487,7 +4264,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """, (instructor_id, student_name, student_telegram_id, student_phone, student_tariff, date, time, duration, booking_comment))
             conn.commit()
         
-        # Повідомлення учню (БЕЗ особистих даних)
         await update.message.reply_text(
             f"✅ *Заняття заброньовано!*\n\n"
             f"👨‍🏫 Інструктор: {instructor_name}\n"
@@ -4497,7 +4273,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         
-        # Розрахунок вартості для інструктора
         if student_tariff > 0:
             if "2" in duration:
                 price = student_tariff * 2
@@ -4506,7 +4281,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             price = PRICES.get(duration, 420)
         
-        # Повідомлення інструктору (З особистими даними ТА сумою)
         booking_comment = context.user_data.get("booking_comment", "")
         
         if instructor_telegram_id:
@@ -4521,7 +4295,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"💰 Вартість: *{price:.0f} грн*"
                 )
                 
-                # Додаємо коментар якщо є
                 if booking_comment:
                     message_text += f"\n\n💬 Коментар учня:\n\"{booking_comment}\""
                 
@@ -4541,7 +4314,6 @@ async def save_lesson(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ======================= CALLBACKS =======================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка callback кнопок"""
     query = update.callback_query
     await query.answer()
     
@@ -4555,7 +4327,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Помилка.")
 
 async def handle_unblock_callback(query, context, block_id):
-    """Розблокування часу"""
     try:
         from database import remove_schedule_block
         
@@ -4570,7 +4341,6 @@ async def handle_unblock_callback(query, context, block_id):
 
 # ======================= REMINDERS =======================
 async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
-    """Відправка нагадувань про заняття"""
     try:
         now = datetime.now(TZ)
         logger.info(f"🔔 send_reminders запущено! Зараз: {now.strftime('%d.%m.%Y %H:%M')}")
@@ -4578,8 +4348,6 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # === НАГАДУВАННЯ ЗА 24 ГОДИНИ ===
-            # Отримуємо всі активні уроки
             cursor.execute("""
                 SELECT l.id, l.student_telegram_id, i.name, l.date, l.time
                 FROM lessons l
@@ -4589,24 +4357,17 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             """)
             
             all_lessons = cursor.fetchall()
-            logger.info(f"📋 Знайдено {len(all_lessons)} активних уроків (без нагадування 24h)")
             lessons_24h = []
             
-            # Перевіряємо кожен урок
             for lesson_id, student_id, instructor, date_str, time_str in all_lessons:
                 try:
-                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
                     lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
                     lesson_datetime = TZ.localize(lesson_datetime)
                     
-                    # Перевіряємо чи урок через 24 години (±30 хвилин)
                     time_diff = (lesson_datetime - now).total_seconds() / 3600
-                    
-                    logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
                     
                     if 23.5 <= time_diff <= 24.5:
                         lessons_24h.append((lesson_id, student_id, instructor, date_str, time_str))
-                        logger.info(f"    ✅ Додано до нагадувань 24h!")
                 except Exception as e:
                     logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
             
@@ -4625,8 +4386,6 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"Failed to send 24h reminder: {e}")
             
-            # === НАГАДУВАННЯ ЗА 2 ГОДИНИ ===
-            # Отримуємо всі активні уроки
             cursor.execute("""
                 SELECT l.id, l.student_telegram_id, i.name, l.date, l.time
                 FROM lessons l
@@ -4636,30 +4395,22 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
             """)
             
             all_lessons_2h = cursor.fetchall()
-            logger.info(f"📋 Знайдено {len(all_lessons_2h)} активних уроків (без нагадування 2h)")
             lessons_2h = []
             
-            # Перевіряємо кожен урок
             for lesson_id, student_id, instructor, date_str, time_str in all_lessons_2h:
                 try:
-                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
                     lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
                     lesson_datetime = TZ.localize(lesson_datetime)
                     
-                    # Перевіряємо чи урок через 2 години (±30 хвилин)
                     time_diff = (lesson_datetime - now).total_seconds() / 3600
-                    
-                    logger.info(f"  📝 Урок #{lesson_id}: {date_str} {time_str}, різниця: {time_diff:.1f} год")
                     
                     if 1.5 <= time_diff <= 2.5:
                         lessons_2h.append((lesson_id, student_id, instructor, date_str, time_str))
-                        logger.info(f"    ✅ Додано до нагадувань 2h!")
                 except Exception as e:
                     logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
             
             for lesson_id, student_id, instructor, date, time in lessons_2h:
                 try:
-                    logger.info(f"📤 Відправляю нагадування 2h учню {student_id}: {date} {time}")
                     await context.bot.send_message(
                         chat_id=student_id,
                         text=f"🔔 *Нагадування!*\n\nУ вас заняття через 2 години:\n"
@@ -4671,7 +4422,6 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
                     
                     cursor.execute("UPDATE lessons SET reminder_2h_sent = 1 WHERE id = ?", (lesson_id,))
                     conn.commit()
-                    logger.info(f"✅ Нагадування 2h відправлено успішно!")
                 except Exception as e:
                     logger.error(f"Failed to send 2h reminder: {e}")
         
@@ -4681,7 +4431,6 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error in send_reminders: {e}", exc_info=True)
 
 async def send_rating_request_to_student(context, student_tg_id, lesson_id, date, time, instructor_name):
-    """Відправити запит на оцінювання інструктора учню"""
     try:
         keyboard = [
             [KeyboardButton("⭐"), KeyboardButton("⭐⭐"), KeyboardButton("⭐⭐⭐")],
@@ -4699,7 +4448,6 @@ async def send_rating_request_to_student(context, student_tg_id, lesson_id, date
             parse_mode="Markdown"
         )
         
-        # Зберігаємо дані уроку для подальшого збереження оцінки
         context.bot_data[f"rating_lesson_{student_tg_id}"] = {
             'lesson_id': lesson_id,
             'instructor_name': instructor_name,
@@ -4707,20 +4455,16 @@ async def send_rating_request_to_student(context, student_tg_id, lesson_id, date
             'time': time
         }
         
-        logger.info(f"📤 Відправлено запит на оцінювання учню {student_tg_id} за урок {lesson_id}")
-        
     except Exception as e:
         logger.error(f"Error sending rating request: {e}", exc_info=True)
 
 async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
-    """Перевірка завершених занять"""
     try:
         now = datetime.now(TZ)
         
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Отримуємо всі активні уроки з даними про учня та інструктора
             cursor.execute("""
                 SELECT l.id, l.date, l.time, l.student_telegram_id, 
                        l.instructor_id, i.name as instructor_name
@@ -4733,11 +4477,9 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
             
             for lesson_id, date_str, time_str, student_tg_id, instructor_id, instructor_name in cursor.fetchall():
                 try:
-                    # Конвертуємо дату з ДД.ММ.РРРР в datetime
                     lesson_datetime = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%Y %H:%M")
                     lesson_datetime = TZ.localize(lesson_datetime)
                     
-                    # Якщо урок вже минув
                     if lesson_datetime < now:
                         lessons_to_complete.append({
                             'id': lesson_id,
@@ -4750,7 +4492,6 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
                 except Exception as e:
                     logger.error(f"Error parsing lesson date {date_str} {time_str}: {e}")
             
-            # Оновлюємо статус
             for lesson in lessons_to_complete:
                 cursor.execute("""
                     UPDATE lessons
@@ -4763,7 +4504,6 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
             if lessons_to_complete:
                 logger.info(f"Completed {len(lessons_to_complete)} lessons")
                 
-                # Відправляємо запит на оцінювання учням
                 for lesson in lessons_to_complete:
                     try:
                         await send_rating_request_to_student(
@@ -4782,7 +4522,6 @@ async def check_completed_lessons(context: ContextTypes.DEFAULT_TYPE):
 
 # ======================= EXPORT WITH PERIOD SELECTION =======================
 async def show_export_period_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Меню вибору періоду для експорту"""
     keyboard = [
         [KeyboardButton("📊 За тиждень")],
         [KeyboardButton("📊 За місяць")],
@@ -4801,7 +4540,6 @@ async def show_export_period_menu(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def handle_export_period_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка вибору періоду"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -4813,17 +4551,16 @@ async def handle_export_period_choice(update: Update, context: ContextTypes.DEFA
     
     if text == "📊 За тиждень":
         date_from = (today - timedelta(days=7)).strftime("%d.%m.%Y")
-        date_to = (today + timedelta(days=7)).strftime("%d.%m.%Y")  # +7 днів вперед
+        date_to = (today + timedelta(days=7)).strftime("%d.%m.%Y")
         period_name = "тиждень"
         
     elif text == "📊 За місяць":
         date_from = (today - timedelta(days=30)).strftime("%d.%m.%Y")
-        date_to = (today + timedelta(days=30)).strftime("%d.%m.%Y")  # +30 днів вперед
+        date_to = (today + timedelta(days=30)).strftime("%d.%m.%Y")
         period_name = "місяць"
         
     elif text == "📊 За весь час":
         date_from = "01.01.2020"
-        # Додаємо +1 рік щоб захопити майбутні уроки
         date_to = (today + timedelta(days=365)).strftime("%d.%m.%Y")
         period_name = "весь час"
         
@@ -4844,11 +4581,9 @@ async def handle_export_period_choice(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text("⚠️ Оберіть період з меню.")
         return
     
-    # Генеруємо Excel
     await export_to_excel_with_period(update, context, date_from, date_to, period_name)
 
 async def handle_export_custom_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка введеного періоду"""
     text = update.message.text
     
     if text == "🔙 Назад":
@@ -4871,7 +4606,6 @@ async def handle_export_custom_period(update: Update, context: ContextTypes.DEFA
         date_from = match.group(1)
         date_to = match.group(2)
         
-        # Перевіряємо валідність дат
         from datetime import datetime
         try:
             datetime.strptime(date_from, "%d.%m.%Y")
@@ -4882,7 +4616,6 @@ async def handle_export_custom_period(update: Update, context: ContextTypes.DEFA
         
         period_name = f"{date_from} - {date_to}"
         
-        # Генеруємо Excel
         await export_to_excel_with_period(update, context, date_from, date_to, period_name)
         
     except Exception as e:
@@ -4890,7 +4623,6 @@ async def handle_export_custom_period(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text("❌ Помилка обробки періоду.")
 
 async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFAULT_TYPE, date_from: str, date_to: str, period_name: str):
-    """Експорт даних в Excel за період"""
     user_id = update.message.from_user.id
     
     try:
@@ -4900,17 +4632,14 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
         from openpyxl.styles import Font, PatternFill, Alignment
         from io import BytesIO
         
-        # Створюємо Excel workbook
         wb = Workbook()
         
-        # ============ ЛИСТ 1: УРОКИ ============
         ws1 = wb.active
         ws1.title = "Уроки"
         
         headers1 = ["ID", "Дата", "Час", "Інструктор", "Учень", "Телефон", "Тариф", "Тривалість", "Вартість", "Статус", "⭐ Оцінка учня", "💬 Коментар учня", "⭐ Оцінка інструктора", "💬 Коментар інструктора"]
         ws1.append(headers1)
         
-        # Стилізація
         header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF")
         
@@ -4919,26 +4648,18 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Дані уроків - ОТРИМУЄМО ВСІ, ФІЛЬТРУЄМО В PYTHON
         with get_db() as conn:
             cursor = conn.cursor()
             
-            # Перевіряємо чи є нові колонки в БД
             cursor.execute("PRAGMA table_info(lessons)")
             columns = {row[1] for row in cursor.fetchall()}
             has_instructor_rating = 'instructor_rating' in columns
             has_instructor_feedback = 'instructor_feedback' in columns
             
-            logger.info(f"🔍 Колонки БД: instructor_rating={has_instructor_rating}, instructor_feedback={has_instructor_feedback}")
-            
-            # SQL запит залежно від наявності колонок
             if has_instructor_rating and has_instructor_feedback:
-                # Нова БД з колонками
                 cursor.execute("""
                     SELECT 
-                        l.id,
-                        l.date,
-                        l.time,
+                        l.id, l.date, l.time,
                         i.name as instructor_name,
                         s.name as student_name,
                         s.phone as student_phone,
@@ -4949,23 +4670,17 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                             WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
                             ELSE s.tariff * 1
                         END as earnings,
-                        l.status,
-                        l.rating,
-                        l.feedback,
-                        l.instructor_rating,
-                        l.instructor_feedback
+                        l.status, l.rating, l.feedback,
+                        l.instructor_rating, l.instructor_feedback
                     FROM lessons l
                     LEFT JOIN instructors i ON l.instructor_id = i.id
                     LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
                     ORDER BY l.date DESC, l.time DESC
                 """)
             else:
-                # Стара БД без нових колонок - додаємо NULL
                 cursor.execute("""
                     SELECT 
-                        l.id,
-                        l.date,
-                        l.time,
+                        l.id, l.date, l.time,
                         i.name as instructor_name,
                         s.name as student_name,
                         s.phone as student_phone,
@@ -4976,9 +4691,7 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                             WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
                             ELSE s.tariff * 1
                         END as earnings,
-                        l.status,
-                        l.rating,
-                        l.feedback,
+                        l.status, l.rating, l.feedback,
                         NULL as instructor_rating,
                         NULL as instructor_feedback
                     FROM lessons l
@@ -4989,64 +4702,30 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             
             all_lessons = cursor.fetchall()
         
-        # === ДІАГНОСТИКА ===
-        logger.info(f"📊 ДІАГНОСТИКА ЕКСПОРТУ")
-        logger.info(f"📅 Період: {date_from} - {date_to}")
-        logger.info(f"🔍 Всього уроків в БД: {len(all_lessons)}")
-        
-        if len(all_lessons) > 0:
-            # Показуємо перші 5 дат
-            sample_dates = [lesson[1] for lesson in all_lessons[:5]]
-            logger.info(f"📝 Перші 5 дат в БД: {sample_dates}")
-        else:
-            logger.warning(f"⚠️ БД порожня! Уроків: 0")
-        # === КІНЕЦЬ ДІАГНОСТИКИ ===
-        
-        # Фільтруємо уроки в Python по датах
         from datetime import datetime as dt
         date_from_obj = dt.strptime(date_from, "%d.%m.%Y")
         date_to_obj = dt.strptime(date_to, "%d.%m.%Y")
         
-        logger.info(f"🔄 Початок фільтрації...")
-        logger.info(f"📆 date_from_obj: {date_from_obj}")
-        logger.info(f"📆 date_to_obj: {date_to_obj}")
-        
         lessons = []
-        filtered_out = 0
-        parse_errors = 0
-        
         for lesson in all_lessons:
             try:
                 lesson_date = dt.strptime(lesson[1], "%d.%m.%Y")
                 if date_from_obj <= lesson_date <= date_to_obj:
                     lessons.append(lesson)
-                else:
-                    filtered_out += 1
-            except (ValueError, TypeError) as e:
-                # Пропускаємо уроки з невірним форматом дати
-                parse_errors += 1
-                logger.warning(f"❌ Помилка парсингу дати: {lesson[1]} - {e}")
+            except (ValueError, TypeError):
                 continue
         
-        # === ПІДСУМОК ДІАГНОСТИКИ ===
-        logger.info(f"✅ Відфільтровано (в період): {len(lessons)}")
-        logger.info(f"🚫 Відфільтровано (поза періодом): {filtered_out}")
-        logger.info(f"❌ Помилки парсингу дат: {parse_errors}")
-        # === КІНЕЦЬ ПІДСУМКУ ===
-        
-        # Статистика для повідомлення
         total_lessons = len(lessons)
         total_earnings = 0
         unique_students = set()
         
         for lesson in lessons:
-                ws1.append(lesson)
-                if lesson[8]:  # earnings
-                    total_earnings += lesson[8]
-                if lesson[4]:  # student_name
-                    unique_students.add(lesson[4])
+            ws1.append(lesson)
+            if lesson[8]:
+                total_earnings += lesson[8]
+            if lesson[4]:
+                unique_students.add(lesson[4])
         
-        # Автоширина
         for column in ws1.columns:
             max_length = 0
             column = [cell for cell in column]
@@ -5059,9 +4738,7 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             adjusted_width = min(max_length + 2, 50)
             ws1.column_dimensions[column[0].column_letter].width = adjusted_width
         
-        # ============ ЛИСТ 2: УЧНІ ============
         ws2 = wb.create_sheet(title="Учні")
-        
         headers2 = ["Учень", "Телефон", "Тариф", "Уроків", "Годин", "Витрачено", "⭐ Середній рейтинг"]
         ws2.append(headers2)
         
@@ -5070,17 +4747,15 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Дані учнів - використовуємо відфільтровані уроки
-        # Групуємо по учням вручну в Python
         students_stats = {}
         
         for lesson in lessons:
-            student_name = lesson[4]  # s.name
-            student_phone = lesson[5]  # s.phone
-            student_tariff = lesson[6]  # s.tariff
-            duration = lesson[7]  # l.duration
-            earnings = lesson[8]  # earnings
-            instructor_rating = lesson[12]  # l.instructor_rating (НОВЕ!)
+            student_name = lesson[4]
+            student_phone = lesson[5]
+            student_tariff = lesson[6]
+            duration = lesson[7]
+            earnings = lesson[8]
+            instructor_rating = lesson[12]
             
             if not student_name or not student_tariff:
                 continue
@@ -5092,12 +4767,11 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                     'lessons': 0,
                     'hours': 0,
                     'spent': 0,
-                    'ratings': []  # НОВЕ: список оцінок
+                    'ratings': []
                 }
             
             students_stats[student_name]['lessons'] += 1
             
-            # Рахуємо години
             if "1.5" in duration:
                 students_stats[student_name]['hours'] += 1.5
             elif "2" in duration:
@@ -5105,36 +4779,27 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             else:
                 students_stats[student_name]['hours'] += 1
             
-            # Рахуємо витрати
             if earnings:
                 students_stats[student_name]['spent'] += earnings
             
-            # Збираємо оцінки (НОВЕ!)
             if instructor_rating and instructor_rating > 0:
                 students_stats[student_name]['ratings'].append(instructor_rating)
         
-        # Конвертуємо в список для Excel
-        students = []
         for name, stats in sorted(students_stats.items(), key=lambda x: x[1]['lessons'], reverse=True):
-            # Рахуємо середній рейтинг
             avg_rating = sum(stats['ratings']) / len(stats['ratings']) if stats['ratings'] else None
             if avg_rating:
                 avg_rating = round(avg_rating, 1)
             
-            students.append((
+            ws2.append((
                 name,
                 stats['phone'],
                 stats['tariff'],
                 stats['lessons'],
                 stats['hours'],
                 stats['spent'],
-                avg_rating if avg_rating else '-'  # НОВЕ: рейтинг
+                avg_rating if avg_rating else '-'
             ))
         
-        for student in students:
-                ws2.append(student)
-        
-        # Автоширина
         for column in ws2.columns:
             max_length = 0
             column = [cell for cell in column]
@@ -5147,9 +4812,7 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             adjusted_width = min(max_length + 2, 50)
             ws2.column_dimensions[column[0].column_letter].width = adjusted_width
         
-        # ============ ЛИСТ 3: ІНСТРУКТОРИ ============
         ws3 = wb.create_sheet(title="Інструктори")
-        
         headers3 = ["Інструктор", "Тариф", "Уроків", "Годин", "Заробіток", "Рейтинг"]
         ws3.append(headers3)
         
@@ -5158,26 +4821,18 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Дані інструкторів - використовуємо відфільтровані уроки
-        # Спочатку отримуємо дані інструкторів
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, name, price_per_hour
-                FROM instructors
-            """)
+            cursor.execute("SELECT id, name, price_per_hour FROM instructors")
             all_instructors = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
         
-        # Групуємо статистику по інструкторах
         instructors_stats = {}
         
         for lesson in lessons:
-            # Знаходимо instructor_id через instructor_name
-            instructor_name = lesson[3]  # i.name
+            instructor_name = lesson[3]
             if not instructor_name:
                 continue
             
-            # Шукаємо instructor_id
             instructor_id = None
             instructor_price = 0
             for iid, (iname, iprice) in all_instructors.items():
@@ -5201,7 +4856,6 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             
             instructors_stats[instructor_id]['lessons'] += 1
             
-            # Рахуємо години
             duration = lesson[7]
             if "1.5" in duration:
                 instructors_stats[instructor_id]['hours'] += 1.5
@@ -5210,37 +4864,25 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             else:
                 instructors_stats[instructor_id]['hours'] += 1
             
-            # Рахуємо заробіток
             earnings = lesson[8]
             if earnings:
                 instructors_stats[instructor_id]['earnings'] += earnings
             
-            # Збираємо рейтинги
             rating = lesson[10]
             if rating and rating > 0:
                 instructors_stats[instructor_id]['ratings'].append(rating)
         
-        # Конвертуємо в список для Excel
-        instructors = []
         for iid, stats in sorted(instructors_stats.items(), key=lambda x: x[1]['lessons'], reverse=True):
             avg_rating = sum(stats['ratings']) / len(stats['ratings']) if stats['ratings'] else 0
-            instructors.append((
+            ws3.append((
                 stats['name'],
                 stats['price'],
                 stats['lessons'],
                 stats['hours'],
                 stats['earnings'],
-                avg_rating
+                round(avg_rating, 1)
             ))
         
-        for instructor in instructors:
-                row = list(instructor)
-                # Форматуємо рейтинг
-                if len(row) > 5 and row[5]:
-                    row[5] = round(row[5], 1)
-                ws3.append(row)
-        
-        # Автоширина
         for column in ws3.columns:
             max_length = 0
             column = [cell for cell in column]
@@ -5252,11 +4894,8 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                     pass
             adjusted_width = min(max_length + 2, 50)
             ws3.column_dimensions[column[0].column_letter].width = adjusted_width
-        
 
-        # ============ ЛИСТ 4: ЗАБЛОКОВАНІ ЧАСИ ============
         ws4 = wb.create_sheet(title="Заблоковані часи")
-        
         headers4 = ["Інструктор", "Дата", "Час початку", "Час кінця", "Причина", "Створено"]
         ws4.append(headers4)
         
@@ -5265,17 +4904,12 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
-        # Отримуємо заблоковані часи
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT 
                     i.name AS instructor_name,
-                    sb.date,
-                    sb.time_start,
-                    sb.time_end,
-                    sb.reason,
-                    sb.created_at
+                    sb.date, sb.time_start, sb.time_end, sb.reason, sb.created_at
                 FROM schedule_blocks sb
                 JOIN instructors i ON sb.instructor_id = i.id
                 ORDER BY sb.date DESC, sb.time_start
@@ -5285,13 +4919,12 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
         if blocked_times:
             for block in blocked_times:
                 instructor_name = block[0]
-                date = block[1]  # YYYY-MM-DD
+                date = block[1]
                 time_start = block[2]
                 time_end = block[3]
                 reason = block[4] or "Не вказано"
                 created_at = block[5]
                 
-                # Форматуємо дату в DD.MM.YYYY
                 try:
                     date_obj = datetime.strptime(date, "%Y-%m-%d")
                     date_formatted = date_obj.strftime("%d.%m.%Y")
@@ -5300,10 +4933,6 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                 except:
                     date_display = date
                 
-                # Форматуємо час
-                time_display = f"{time_start} - {time_end}"
-                
-                # Форматуємо created_at
                 try:
                     created_obj = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
                     created_display = created_obj.strftime("%d.%m.%Y %H:%M")
@@ -5319,10 +4948,8 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
                     created_display
                 ])
         else:
-            # Якщо немає заблокованих часів
             ws4.append(["Немає заблокованих часів", "", "", "", "", ""])
         
-        # Автоширина
         for column in ws4.columns:
             max_length = 0
             column = [cell for cell in column]
@@ -5335,15 +4962,12 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
             adjusted_width = min(max_length + 2, 50)
             ws4.column_dimensions[column[0].column_letter].width = adjusted_width
         
-        # ============ ЗБЕРІГАЄМО ФАЙЛ ============
         excel_file = BytesIO()
         wb.save(excel_file)
         excel_file.seek(0)
         
-        # Назва файлу
         filename = f"export_{period_name.replace(' ', '_').replace(':', '-')}.xlsx"
         
-        # Відправляємо файл
         await context.bot.send_document(
             chat_id=update.message.chat_id,
             document=excel_file,
@@ -5358,7 +4982,6 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
         
         logger.info(f"✅ Excel exported for period: {period_name}")
         
-        # Повертаємось в меню адміна
         await show_admin_panel(update, context)
         
     except Exception as e:
@@ -5369,216 +4992,9 @@ async def export_to_excel_with_period(update: Update, context: ContextTypes.DEFA
         )
         await show_admin_panel(update, context)
 
-# ======================= EXPORT TO EXCEL (OLD - DEPRECATED) =======================
-async def export_to_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Експорт всіх даних в Excel"""
-    user_id = update.message.from_user.id
-    
-    # Перевірка прав доступу (тільки адміни)
-    if not is_admin(user_id):
-        await update.message.reply_text("❌ У вас немає доступу до цієї функції.")
-        return
-    
-    try:
-        await update.message.reply_text("⏳ Генерую Excel файл... Зачекайте...")
-        
-        # Створюємо Excel workbook
-        wb = Workbook()
-        
-        # ============ ЛИСТ 1: УРОКИ ============
-        ws1 = wb.active
-        ws1.title = "Уроки"
-        
-        # Заголовки
-        headers1 = ["ID", "Дата", "Час", "Інструктор", "Учень", "Телефон", "Тариф", "Тривалість", "Вартість", "Статус", "Оцінка учня", "Коментар"]
-        ws1.append(headers1)
-        
-        # Стилізація заголовків
-        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF")
-        
-        for cell in ws1[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-        # Дані уроків
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT 
-                    l.id,
-                    l.date,
-                    l.time,
-                    i.name as instructor_name,
-                    s.name as student_name,
-                    s.phone as student_phone,
-                    s.tariff,
-                    l.duration,
-                    CASE 
-                        WHEN l.duration LIKE '%2%' THEN s.tariff * 2
-                        WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
-                        ELSE s.tariff * 1
-                    END as earnings,
-                    l.status,
-                    l.rating,
-                    l.feedback
-                FROM lessons l
-                LEFT JOIN instructors i ON l.instructor_id = i.id
-                LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
-                ORDER BY l.date DESC, l.time DESC
-            """)
-            lessons = cursor.fetchall()
-            
-            for lesson in lessons:
-                ws1.append(lesson)
-        
-        # Автоширина колонок
-        for column in ws1.columns:
-            max_length = 0
-            column = [cell for cell in column]
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws1.column_dimensions[column[0].column_letter].width = adjusted_width
-        
-        # ============ ЛИСТ 2: УЧНІ ============
-        ws2 = wb.create_sheet(title="Учні")
-        
-        headers2 = ["ID", "Ім'я", "Телефон", "Тариф", "Telegram ID", "Дата реєстрації"]
-        ws2.append(headers2)
-        
-        # Стилізація
-        for cell in ws2[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-        # Дані учнів
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, name, phone, tariff, telegram_id, created_at
-                FROM students
-                ORDER BY created_at DESC
-            """)
-            students = cursor.fetchall()
-            
-            for student in students:
-                ws2.append(student)
-        
-        # Автоширина
-        for column in ws2.columns:
-            max_length = 0
-            column = [cell for cell in column]
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws2.column_dimensions[column[0].column_letter].width = adjusted_width
-        
-        # ============ ЛИСТ 3: СТАТИСТИКА ІНСТРУКТОРІВ ============
-        ws3 = wb.create_sheet(title="Статистика інструкторів")
-        
-        headers3 = ["Інструктор", "Тариф", "Уроків (всього)", "Годин", "Заробіток", "Рейтинг"]
-        ws3.append(headers3)
-        
-        # Стилізація
-        for cell in ws3[1]:
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-        # Дані інструкторів
-        with get_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT 
-                    i.name,
-                    i.price_per_hour,
-                    COUNT(l.id) as total_lessons,
-                    SUM(
-                        CASE 
-                            WHEN l.duration LIKE '%2%' THEN 2
-                            WHEN l.duration LIKE '%1.5%' THEN 1.5
-                            ELSE 1
-                        END
-                    ) as total_hours,
-                    SUM(
-                        CASE 
-                            WHEN l.duration LIKE '%2%' THEN s.tariff * 2
-                            WHEN l.duration LIKE '%1.5%' THEN s.tariff * 1.5
-                            ELSE s.tariff * 1
-                        END
-                    ) as total_earnings,
-                    COALESCE(AVG(CASE WHEN l.rating > 0 THEN l.rating END), 0) as avg_rating
-                FROM instructors i
-                LEFT JOIN lessons l ON i.id = l.instructor_id AND l.status = 'completed'
-                LEFT JOIN students s ON l.student_telegram_id = s.telegram_id
-                GROUP BY i.id
-                ORDER BY total_lessons DESC
-            """)
-            instructors = cursor.fetchall()
-            
-            for instructor in instructors:
-                row = list(instructor)
-                # Форматуємо рейтинг (тепер це індекс 5, не 6!)
-                if len(row) > 5 and row[5]:
-                    row[5] = round(row[5], 1)
-                ws3.append(row)
-        
-        # Автоширина
-        for column in ws3.columns:
-            max_length = 0
-            column = [cell for cell in column]
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            ws3.column_dimensions[column[0].column_letter].width = adjusted_width
-        
-        # Зберігаємо в BytesIO
-        excel_file = BytesIO()
-        wb.save(excel_file)
-        excel_file.seek(0)
-        
-        # Відправляємо файл
-        now = datetime.now(TZ)
-        filename = f"driving_school_export_{now.strftime('%Y%m%d_%H%M%S')}.xlsx"
-        
-        await update.message.reply_document(
-            document=excel_file,
-            filename=filename,
-            caption=f"📊 **Експорт даних автошколи**\n\n"
-                   f"📅 Дата: {now.strftime('%d.%m.%Y %H:%M')}\n"
-                   f"📋 Листів: 3 (Уроки, Учні, Статистика)\n"
-                   f"✅ Готово!",
-            parse_mode="Markdown"
-        )
-        
-        logger.info(f"✅ Excel експорт створено користувачем {user_id}")
-        
-    except Exception as e:
-        logger.error(f"Error in export_to_excel: {e}", exc_info=True)
-        await update.message.reply_text(
-            f"❌ Помилка при створенні Excel файлу:\n{str(e)}"
-        )
-
-# ======================= ОБРОБКА ДОКУМЕНТІВ =======================
 # ======================= MAIN =======================
 def main():
     try:
-        # Встановлюємо DB_NAME в environment для database.py
         os.environ["DB_NAME"] = DB_NAME
         
         logger.info("🚀 PRODUCTION ВЕРСІЯ БОТА")
@@ -5591,10 +5007,8 @@ def main():
         migrate_database()
         init_schedule_blocks_table()
         
-        # Автоматично додаємо інструкторів якщо їх немає
         ensure_instructors_exist()
 
-        # Створюємо application з job_queue
         from telegram.ext import JobQueue
         app = (
             ApplicationBuilder()
@@ -5602,17 +5016,14 @@ def main():
             .build()
         )
 
-        # Команди
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("register490", register_490))
         app.add_handler(CommandHandler("register550", register_550))
         
-        # Обробники
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
         app.add_handler(MessageHandler(filters.CONTACT, handle_message))
 
-        # Нагадування кожні 30 хв (тільки якщо job_queue існує)
         if app.job_queue:
             app.job_queue.run_repeating(send_reminders, interval=1800, first=10)
             app.job_queue.run_repeating(check_completed_lessons, interval=900, first=60)
@@ -5626,11 +5037,9 @@ def main():
         print(f"   490 грн: https://t.me/InstructorIFBot?start=register490")
         print(f"   550 грн: https://t.me/InstructorIFBot?start=register550")
         
-        # Запускаємо polling в окремому потоці
         import threading
         from http.server import HTTPServer, BaseHTTPRequestHandler
         
-        # Простий HTTP сервер для Render
         class HealthCheckHandler(BaseHTTPRequestHandler):
             def do_GET(self):
                 self.send_response(200)
@@ -5639,9 +5048,8 @@ def main():
                 self.wfile.write(b'Bot is running!')
             
             def log_message(self, format, *args):
-                pass  # Вимикаємо логи HTTP сервера
+                pass
         
-        # Запускаємо HTTP сервер в окремому потоці
         port = int(os.environ.get('PORT', 8080))
         server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
         server_thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -5649,7 +5057,6 @@ def main():
         logger.info(f"🌐 HTTP сервер запущено на порту {port}")
         print(f"🌐 HTTP сервер запущено на порту {port}")
         
-        # Запускаємо polling в головному потоці (один екземпляр!)
         app.run_polling(drop_pending_updates=True, stop_signals=None)
     
     except Exception as e:
