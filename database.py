@@ -521,8 +521,8 @@ def get_instructor_stats_period(instructor_id, date_from, date_to):
             
             cancelled = cursor.fetchone()[0]
             
-            # Заробіток (400 грн/год)
-            earnings = total_hours * 400
+            # Заробіток (420 грн/год)
+            earnings = total_hours * 420
             
             return {
                 'total_lessons': total_lessons or 0,
@@ -628,7 +628,7 @@ def get_instructor_report(instructor_id, date_from, date_to):
                 details.append((date, time, hours, student_name, status, rating))
             
             avg_rating = sum(ratings) / len(ratings) if ratings else 0
-            earnings = total_hours * 400
+            earnings = total_hours * 420
             
             return {
                 'total_lessons': total_lessons,
