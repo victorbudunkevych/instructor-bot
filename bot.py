@@ -2128,7 +2128,7 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         current_hour = now.hour
         
         keyboard = []
-        for hour in range(WORK_HOURS_START, WORK_HOURS_END + 2):
+        for hour in range(WORK_HOURS_START, WORK_HOURS_END + 1):
             if is_today and hour <= current_hour:
                 continue
             keyboard.append([KeyboardButton(f"{hour:02d}:00")])
@@ -2151,7 +2151,7 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         
         start_hour = int(text.split(':')[0])
         keyboard = []
-        for hour in range(start_hour + 1, WORK_HOURS_END + 1):
+        for hour in range(start_hour + 1, WORK_HOURS_END + 2):
             keyboard.append([KeyboardButton(f"{hour:02d}:00")])
         
         keyboard.append([KeyboardButton("🔙 Назад")])
