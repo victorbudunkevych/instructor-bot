@@ -2071,7 +2071,13 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
     """Обробка управління графіком"""
     text = update.message.text
     state = context.user_data.get("state")
-    
+
+    # Ігноруємо текстові повідомлення поки чекаємо callback розблокування
+    if state == "waiting_unblock":
+        if text == "🔙 Назад":
+            await manage_schedule(update, context)
+        return
+
     if text == "🔙 Назад":
         if state == "schedule_menu":
             await start(update, context)
@@ -2101,6 +2107,7 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
     
     elif text == "🟢 Розблокувати час":
         await show_blocks_to_unblock(update, context)
+        context.user_data["state"] = "waiting_unblock"
         return
     
     elif text == "📋 Мої блокування":
