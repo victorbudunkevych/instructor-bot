@@ -855,8 +855,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # === УПРАВЛІННЯ ГРАФІКОМ ===
         if state in ["schedule_menu", "block_choose_date", "block_choose_time_start", 
-                     "block_choose_time_end", "block_choose_reason", "unblock_choose_date",
-                     "waiting_unblock"]:
+                     "block_choose_time_end", "block_choose_reason", "unblock_choose_date"]:
             await handle_schedule_management(update, context)
             return
 
@@ -2072,13 +2071,7 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
     """Обробка управління графіком"""
     text = update.message.text
     state = context.user_data.get("state")
-
-    # Ігноруємо текстові повідомлення поки чекаємо callback розблокування
-    if state == "waiting_unblock":
-        if text == "🔙 Назад":
-            await manage_schedule(update, context)
-        return
-
+    
     if text == "🔙 Назад":
         if state == "schedule_menu":
             await start(update, context)
@@ -2108,7 +2101,6 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
     
     elif text == "🟢 Розблокувати час":
         await show_blocks_to_unblock(update, context)
-        context.user_data["state"] = "waiting_unblock"
         return
     
     elif text == "📋 Мої блокування":
@@ -2334,6 +2326,12 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
                 f"❌ {date} {time_start}-{time_end}",
                 callback_data=f"unblock_{block_id}"
             )])
+        
+        # Спочатку прибираємо ReplyKeyboard щоб інлайн кнопки працювали
+        await update.message.reply_text(
+            "⌨️ Оберіть блокування нижче:",
+            reply_markup=ReplyKeyboardRemove()
+        )
         
         await update.message.reply_text(
             text,
