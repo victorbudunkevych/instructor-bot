@@ -855,8 +855,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # === УПРАВЛІННЯ ГРАФІКОМ ===
         if state in ["schedule_menu", "block_choose_date", "block_choose_time_start", 
-                     "block_choose_time_end", "block_choose_reason", "unblock_choose_date",
-                     "waiting_unblock"]:
+                     "block_choose_time_end", "block_choose_reason", "unblock_choose_date", "waiting_unblock"]:
             await handle_schedule_management(update, context)
             return
 
@@ -2073,10 +2072,56 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
     text = update.message.text
     state = context.user_data.get("state")
 
-    # Ігноруємо текстові повідомлення поки чекаємо callback розблокування
+    # Обробка розблокування через кнопки з номерами
     if state == "waiting_unblock":
         if text == "🔙 Назад":
             await manage_schedule(update, context)
+            return
+        
+        if text.startswith("❌ "):
+            num = text.replace("❌ ", "").strip()
+            user_id_s = update.message.from_user.id
+            
+            # Спочатку з user_data
+            blocks_map = context.user_data.get("blocks_map", {})
+            
+            # Якщо немає — читаємо з БД (інший інстанс Render)
+            if not blocks_map:
+                import json as _json
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("""
+                            SELECT data FROM user_sessions
+                            WHERE user_id = ? AND state = 'waiting_unblock'
+                        """, (user_id_s,))
+                        row = cursor.fetchone()
+                        if row:
+                            blocks_map = _json.loads(row[0])
+                    except Exception as e:
+                        logger.warning(f"session read error: {e}")
+            
+            block_id = blocks_map.get(num)
+            if block_id:
+                from database import remove_schedule_block
+                if remove_schedule_block(block_id):
+                    await update.message.reply_text("✅ Блокування видалено!")
+                else:
+                    await update.message.reply_text("❌ Помилка видалення.")
+                # Очищаємо сесію
+                with get_db() as conn:
+                    cursor = conn.cursor()
+                    try:
+                        cursor.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id_s,))
+                        conn.commit()
+                    except:
+                        pass
+                context.user_data.pop("blocks_map", None)
+                await manage_schedule(update, context)
+            else:
+                await update.message.reply_text("⚠️ Невірний номер. Оберіть зі списку.")
+            return
+        
         return
 
     if text == "🔙 Назад":
@@ -2290,7 +2335,7 @@ async def handle_schedule_management(update: Update, context: ContextTypes.DEFAU
         await manage_schedule(update, context)
 
 async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показати блокування для видалення (тільки майбутні)"""
+    """Показати блокування для видалення через ReplyKeyboard з номерами"""
     user_id = update.message.from_user.id
     
     try:
@@ -2312,38 +2357,59 @@ async def show_blocks_to_unblock(update: Update, context: ContextTypes.DEFAULT_T
                 WHERE instructor_id = ?
                 AND date >= ?
                 ORDER BY date, time_start
-                LIMIT 30
+                LIMIT 20
             """, (instructor_id, today_str))
             
             future_blocks = cursor.fetchall()
         
         if not future_blocks:
             await update.message.reply_text("📋 Немає майбутніх блокувань.")
+            await manage_schedule(update, context)
             return
         
-        text = "🟢 *Оберіть блокування для видалення:*\n\n"
-        buttons = []
+        # Зберігаємо map номер->block_id в user_data ТА в БД
+        blocks_map = {}
+        for i, (block_id, date, time_start, time_end, reason) in enumerate(future_blocks, 1):
+            blocks_map[str(i)] = block_id
         
-        for block_id, date, time_start, time_end, reason in future_blocks:
-            text += f"📅 {date} | 🕐 {time_start}-{time_end}\n"
+        context.user_data["blocks_map"] = blocks_map
+        
+        # Зберігаємо в БД для надійності між інстансами
+        import json
+        with get_db() as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS user_sessions (
+                        user_id INTEGER PRIMARY KEY,
+                        state TEXT,
+                        data TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cursor.execute("""
+                    INSERT OR REPLACE INTO user_sessions (user_id, state, data, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                """, (user_id, "waiting_unblock", json.dumps(blocks_map)))
+                conn.commit()
+            except Exception as e:
+                logger.warning(f"Could not save session: {e}")
+        
+        text = "🟢 *Оберіть номер блокування для видалення:*\n\n"
+        keyboard = []
+        
+        for i, (block_id, date, time_start, time_end, reason) in enumerate(future_blocks, 1):
+            text += f"{i}. 📅 {date} 🕐 {time_start}-{time_end}"
             if reason:
-                text += f"💬 {reason}\n"
+                text += f" — {reason}"
             text += "\n"
-            
-            buttons.append([InlineKeyboardButton(
-                f"❌ {date} {time_start}-{time_end}",
-                callback_data=f"unblock_{block_id}"
-            )])
+            keyboard.append([KeyboardButton(f"❌ {i}")])
         
-        # Спочатку прибираємо ReplyKeyboard щоб інлайн кнопки працювали
-        await update.message.reply_text(
-            "⌨️ Оберіть блокування нижче:",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        keyboard.append([KeyboardButton("🔙 Назад")])
         
         await update.message.reply_text(
             text,
-            reply_markup=InlineKeyboardMarkup(buttons),
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
         )
         
