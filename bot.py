@@ -350,7 +350,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         command = context.args[0]
         logger.info(f"🔗 Deep link виявлено: {command} — доступ заблоковано")
-        if command in ("register490", "register550"):
+        if command in ("register490", "register590"):
             await update.message.reply_text(
                 "⛔ *Самостійна реєстрація заблокована*\n\n"
                 "Для внесення вас в систему зверніться до адміністратора автошколи.\n\n"
@@ -428,9 +428,9 @@ async def register_490(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"❌ Помилка в register_490: {e}", exc_info=True)
 
-async def register_550(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Реєстрація учня з тарифом 550 грн"""
-    await register_student_with_tariff(update, context, 550)
+async def register_590(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Реєстрація учня з тарифом 590 грн"""
+    await register_student_with_tariff(update, context, 590)
 
 async def register_student_with_tariff(update: Update, context: ContextTypes.DEFAULT_TYPE, tariff: int):
     """Загальна функція реєстрації учня"""
@@ -2943,7 +2943,7 @@ async def handle_admin_add_student_phone(update: Update, context: ContextTypes.D
     context.user_data["state"] = "admin_add_student_tariff"
     
     keyboard = [
-        [KeyboardButton("💰 490 грн/год"), KeyboardButton("💰 550 грн/год")],
+        [KeyboardButton("💰 490 грн/год"), KeyboardButton("💰 590 грн/год")],
         [KeyboardButton("🔙 Скасувати")]
     ]
     name = context.user_data["new_student"]["name"]
@@ -2964,7 +2964,7 @@ async def handle_admin_add_student_tariff(update: Update, context: ContextTypes.
     
     tariff_map = {
         "💰 490 грн/год": 490,
-        "💰 550 грн/год": 550
+        "💰 590 грн/год": 590
     }
     
     if text not in tariff_map:
@@ -3457,7 +3457,7 @@ async def handle_admin_manual_enter_name(update: Update, context: ContextTypes.D
     
     keyboard = [
         [KeyboardButton("💰 490 грн/год")],
-        [KeyboardButton("💰 550 грн/год")],
+        [KeyboardButton("💰 590 грн/год")],
         [KeyboardButton("🔙 Назад")]
     ]
     
@@ -3501,7 +3501,7 @@ async def handle_admin_manual_select_transmission(update: Update, context: Conte
         context.user_data["state"] = "admin_manual_select_tariff"
         keyboard = [
             [KeyboardButton("💰 490 грн/год")],
-            [KeyboardButton("💰 550 грн/год")],
+            [KeyboardButton("💰 590 грн/год")],
             [KeyboardButton("🔙 Назад")]
         ]
         await update.message.reply_text(
@@ -5052,7 +5052,7 @@ def main():
 
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("register490", register_490))
-        app.add_handler(CommandHandler("register550", register_550))
+        app.add_handler(CommandHandler("register590", register_590))
         
         app.add_handler(CallbackQueryHandler(handle_callback))
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
@@ -5069,7 +5069,7 @@ def main():
         print("🚀 Бот запущено і слухає...")
         print("\n📝 Посилання для реєстрації учнів:")
         print(f"   490 грн: https://t.me/InstructorIFBot?start=register490")
-        print(f"   550 грн: https://t.me/InstructorIFBot?start=register550")
+        print(f"   590 грн: https://t.me/InstructorIFBot?start=register590")
         
         import threading
         from http.server import HTTPServer, BaseHTTPRequestHandler
