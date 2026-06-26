@@ -3673,12 +3673,27 @@ async def handle_admin_manual_select_date(update: Update, context: ContextTypes.
     
     try:
         parts = text.split()
-        date_part = parts[1]
-        day, month = date_part.split('.')
-        year = datetime.now().year
-        if int(month) < datetime.now().month:
-            year += 1
-        date_str = f"{day.zfill(2)}.{month.zfill(2)}.{year}"
+        
+        # Шукаємо частину що містить крапку (дата формату ДД.ММ або ДД.ММ.РРРР)
+        date_part = None
+        for part in parts:
+            clean = part.replace("(", "").replace(")", "")
+            if clean.count('.') >= 1 and any(c.isdigit() for c in clean):
+                date_part = clean
+                break
+        
+        if not date_part:
+            await update.message.reply_text("❌ Помилка парсингу дати. Оберіть зі списку.")
+            return
+        
+        if date_part.count('.') == 1:
+            day, month = date_part.split('.')
+            year = datetime.now().year
+            if int(month) < datetime.now().month:
+                year += 1
+            date_str = f"{day.zfill(2)}.{month.zfill(2)}.{year}"
+        else:
+            date_str = date_part
         
         context.user_data["admin_booking"]["date"] = date_str
         
@@ -3705,7 +3720,8 @@ async def handle_admin_manual_select_date(update: Update, context: ContextTypes.
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
         )
-    except:
+    except Exception as e:
+        logger.error(f"Error in handle_admin_manual_select_date: {e}", exc_info=True)
         await update.message.reply_text("❌ Помилка парсингу дати. Оберіть зі списку.")
 
 async def handle_admin_manual_select_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
