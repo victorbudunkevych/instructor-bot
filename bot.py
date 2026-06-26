@@ -855,7 +855,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # === УПРАВЛІННЯ ГРАФІКОМ ===
         if state in ["schedule_menu", "block_choose_date", "block_choose_time_start", 
-                     "block_choose_time_end", "block_choose_reason", "unblock_choose_date"]:
+                     "block_choose_time_end", "block_choose_reason", "unblock_choose_date",
+                     "waiting_unblock"]:
             await handle_schedule_management(update, context)
             return
 
